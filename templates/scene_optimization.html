@@ -1,0 +1,1198 @@
+{% extends "base.html" %}
+
+{% block title %}劳作组织优化与历史场景复原 - 古井汲水效率复原平台{% endblock %}
+
+{% block content %}
+<div class="page-header" style="padding:24px 32px; background:linear-gradient(135deg, #2D5A27 0%, #1A3A1A 100%); color:#F0F8EA;">
+    <h1 style="margin:0 0 8px 0; font-family:'Noto Serif SC'; font-size:28px;">🌿 劳作组织优化与历史场景复原</h1>
+    <p style="margin:0; opacity:0.9; font-size:14px;">配置多维度场景参数，模拟不同劳作组织方式的汲水效率与疲劳衰减，自动寻优并生成可视化对比报告</p>
+</div>
+
+<div style="padding:24px 32px;">
+    <div class="form-row two-col" style="margin-bottom:24px;">
+        <label class="form-group">
+            <span class="form-label">选择古井</span>
+            <select id="main-well-select" onchange="onWellChange()">
+                <option value="">-- 请选择古井 --</option>
+                {% for w in wells %}
+                <option value="{{ w.id }}">{{ w.name }}{% if w.location %}（{{ w.location }}）{% endif %}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label class="form-group">
+            <span class="form-label">当前古井结构配置（可选）</span>
+            <select id="main-config-select">
+                <option value="">使用默认参数</option>
+            </select>
+        </label>
+    </div>
+
+    <div class="tabs" style="margin-bottom:24px;">
+        <button class="tab-btn active" data-tab="tab-scenes">🎬 场景配置</button>
+        <button class="tab-btn" data-tab="tab-schemes">👥 劳作方案</button>
+        <button class="tab-btn" data-tab="tab-simulate">⚙️ 模拟实验</button>
+        <button class="tab-btn" data-tab="tab-optimize">📊 优化报告</button>
+    </div>
+
+    <div id="tab-scenes" class="tab-content active">
+        <div class="panel">
+            <div class="panel-header">
+                <h3>场景配置管理</h3>
+                <button class="btn-primary" onclick="openSceneConfigModal()">+ 新增场景</button>
+            </div>
+            <div id="scene-config-list" class="table-wrapper">
+                <p class="empty-hint">请先选择古井以加载场景配置</p>
+            </div>
+        </div>
+    </div>
+
+    <div id="tab-schemes" class="tab-content">
+        <div class="panel">
+            <div class="panel-header">
+                <h3>劳作方案管理</h3>
+                <button class="btn-primary" onclick="openLaborSchemeModal()">+ 新增方案</button>
+            </div>
+            <div id="labor-scheme-list" class="table-wrapper">
+                <p class="empty-hint">请先选择古井以加载劳作方案</p>
+            </div>
+        </div>
+    </div>
+
+    <div id="tab-simulate" class="tab-content">
+        <div class="form-row two-col" style="margin-bottom:20px;">
+            <div class="panel" style="padding:20px;">
+                <h3 style="margin-top:0; color:#2D5A27;">模拟参数</h3>
+                <div class="form-row">
+                    <label class="form-group">
+                        <span class="form-label">模拟名称</span>
+                        <input type="text" id="sim-name" placeholder="如：盛夏午后-双人轮流" value="模拟实验">
+                    </label>
+                </div>
+                <div class="form-row two-col">
+                    <label class="form-group">
+                        <span class="form-label">场景配置</span>
+                        <select id="sim-scene-select">
+                            <option value="">默认场景</option>
+                        </select>
+                    </label>
+                    <label class="form-group">
+                        <span class="form-label">劳作方案</span>
+                        <select id="sim-scheme-select">
+                            <option value="">默认方案（单人独立）</option>
+                        </select>
+                    </label>
+                </div>
+                <div class="form-row two-col">
+                    <label class="form-group">
+                        <span class="form-label">模拟时长（分钟）</span>
+                        <input type="number" id="sim-duration" min="1" step="1" value="120">
+                    </label>
+                    <label class="form-group">
+                        <span class="form-label">时间步长（分钟）</span>
+                        <input type="number" id="sim-step" min="0.1" step="0.1" value="1.0">
+                    </label>
+                </div>
+                <div id="sim-error" class="error-msg hidden" style="margin-top:12px;"></div>
+                <button class="btn-primary" style="width:100%; margin-top:16px;" onclick="runSimulation()" id="run-sim-btn">
+                    🚀 运行模拟
+                </button>
+            </div>
+
+            <div class="panel" style="padding:20px;">
+                <h3 style="margin-top:0; color:#2D5A27;">模拟结果</h3>
+                <div id="sim-result" style="font-size:13px; line-height:1.8;">
+                    <p class="empty-hint">运行模拟后查看结果</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="panel">
+            <div class="panel-header">
+                <h3>模拟曲线</h3>
+            </div>
+            <div id="sim-chart" style="height:400px;">
+                <p class="empty-hint">运行模拟后生成曲线图</p>
+            </div>
+        </div>
+
+        <div class="panel" style="margin-top:20px;">
+            <div class="panel-header">
+                <h3>历史模拟记录</h3>
+            </div>
+            <div id="sim-history" class="table-wrapper">
+                <p class="empty-hint">请先选择古井以加载历史记录</p>
+            </div>
+        </div>
+    </div>
+
+    <div id="tab-optimize" class="tab-content">
+        <div class="panel">
+            <div class="panel-header">
+                <h3>生成优化报告</h3>
+            </div>
+            <div style="padding:0 0 20px 0;">
+                <div class="form-row">
+                    <label class="form-group">
+                        <span class="form-label">报告标题</span>
+                        <input type="text" id="opt-title" placeholder="如：夏季汲水劳作组织优化分析报告" value="劳作组织优化报告">
+                    </label>
+                </div>
+                <div class="form-row">
+                    <label class="form-group">
+                        <span class="form-label">分析人员</span>
+                        <input type="text" id="opt-author" placeholder="如：历史工艺研究组" value="">
+                    </label>
+                </div>
+                <div class="form-row two-col">
+                    <label class="form-group">
+                        <span class="form-label">选择场景（可多选）</span>
+                        <div id="opt-scenes-checkboxes" style="border:1px solid #E8DFD0; border-radius:8px; padding:12px; max-height:150px; overflow-y:auto; background:#FFFBF5;">
+                            <span style="color:#999;">请先选择古井</span>
+                        </div>
+                    </label>
+                    <label class="form-group">
+                        <span class="form-label">选择方案（可多选）</span>
+                        <div id="opt-schemes-checkboxes" style="border:1px solid #E8DFD0; border-radius:8px; padding:12px; max-height:150px; overflow-y:auto; background:#FFFBF5;">
+                            <span style="color:#999;">请先选择古井</span>
+                        </div>
+                    </label>
+                </div>
+                <div class="form-row two-col">
+                    <label class="form-group">
+                        <span class="form-label">模拟时长（分钟）</span>
+                        <input type="number" id="opt-duration" min="1" step="1" value="120">
+                    </label>
+                    <label class="form-group">
+                        <span class="form-label">时间步长（分钟）</span>
+                        <input type="number" id="opt-step" min="0.5" step="0.5" value="2.0">
+                    </label>
+                </div>
+                <div class="form-row">
+                    <label class="form-group">
+                        <span class="form-label">研究说明</span>
+                        <textarea id="opt-summary" rows="3" placeholder="简述本次优化研究的目的、范围和假设条件..."></textarea>
+                    </label>
+                </div>
+                <div id="opt-error" class="error-msg hidden" style="margin-top:12px;"></div>
+                <button class="btn-primary" style="margin-top:16px;" onclick="generateOptimizationReport()" id="gen-opt-btn">
+                    📋 生成优化报告
+                </button>
+            </div>
+        </div>
+
+        <div class="panel" style="margin-top:20px;">
+            <div class="panel-header">
+                <h3>优化报告列表</h3>
+            </div>
+            <div id="opt-reports-list" class="table-wrapper">
+                <p class="empty-hint">请先选择古井以加载优化报告</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="scene-config-modal" class="modal-overlay hidden">
+    <div class="modal" style="max-width:600px;">
+        <div class="modal-header">
+            <h3 id="scene-modal-title">新增场景配置</h3>
+            <button class="modal-close" onclick="closeSceneConfigModal()">×</button>
+        </div>
+        <div class="modal-body">
+            <input type="hidden" id="scene-edit-id">
+            <div class="form-row">
+                <label class="form-group">
+                    <span class="form-label">场景名称 <em>*</em></span>
+                    <input type="text" id="scene-name" maxlength="100" placeholder="如：盛夏正午-泥泞地面">
+                </label>
+            </div>
+            <div class="form-row two-col">
+                <label class="form-group">
+                    <span class="form-label">季节 <em>*</em></span>
+                    <select id="scene-season">
+                        <option value="春季">春季</option>
+                        <option value="夏季">夏季</option>
+                        <option value="秋季">秋季</option>
+                        <option value="冬季">冬季</option>
+                    </select>
+                </label>
+                <label class="form-group">
+                    <span class="form-label">时段 <em>*</em></span>
+                    <select id="scene-time-of-day">
+                        <option value="清晨">清晨</option>
+                        <option value="上午">上午</option>
+                        <option value="正午">正午</option>
+                        <option value="下午">下午</option>
+                        <option value="傍晚">傍晚</option>
+                        <option value="夜间">夜间</option>
+                    </select>
+                </label>
+            </div>
+            <div class="form-row two-col">
+                <label class="form-group">
+                    <span class="form-label">气温（°C）</span>
+                    <input type="number" id="scene-temperature" min="-30" max="50" step="1" value="25">
+                </label>
+                <label class="form-group">
+                    <span class="form-label">相对湿度（%）</span>
+                    <input type="number" id="scene-humidity" min="0" max="100" step="1" value="60">
+                </label>
+            </div>
+            <div class="form-row two-col">
+                <label class="form-group">
+                    <span class="form-label">地面条件 <em>*</em></span>
+                    <select id="scene-ground">
+                        <option value="干燥坚实">干燥坚实</option>
+                        <option value="微湿防滑">微湿防滑</option>
+                        <option value="泥泞湿滑">泥泞湿滑</option>
+                        <option value="结冰光滑">结冰光滑</option>
+                        <option value="沙石凹凸">沙石凹凸</option>
+                    </select>
+                </label>
+                <label class="form-group">
+                    <span class="form-label">风力等级</span>
+                    <select id="scene-wind">
+                        <option value="0">0级（无风）</option>
+                        <option value="1">1级（软风）</option>
+                        <option value="2">2级（轻风）</option>
+                        <option value="3">3级（微风）</option>
+                        <option value="4">4级（和风）</option>
+                        <option value="5">5级（清劲风）</option>
+                    </select>
+                </label>
+            </div>
+            <div class="form-row">
+                <label class="form-group">
+                    <span class="form-label">水位深度（米）</span>
+                    <input type="number" id="scene-water-level" min="0" max="50" step="0.1" value="5.0">
+                </label>
+            </div>
+            <div class="form-row">
+                <label class="form-group">
+                    <span class="form-label">场景描述</span>
+                    <textarea id="scene-description" rows="2" maxlength="500" placeholder="描述场景特点、历史背景等..."></textarea>
+                </label>
+            </div>
+            <div id="scene-form-error" class="error-msg hidden"></div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn-secondary" onclick="closeSceneConfigModal()">取消</button>
+            <button class="btn-primary" onclick="saveSceneConfig()">保存</button>
+        </div>
+    </div>
+</div>
+
+<div id="labor-scheme-modal" class="modal-overlay hidden">
+    <div class="modal" style="max-width:600px;">
+        <div class="modal-header">
+            <h3 id="scheme-modal-title">新增劳作方案</h3>
+            <button class="modal-close" onclick="closeLaborSchemeModal()">×</button>
+        </div>
+        <div class="modal-body">
+            <input type="hidden" id="scheme-edit-id">
+            <div class="form-row">
+                <label class="form-group">
+                    <span class="form-label">方案名称 <em>*</em></span>
+                    <input type="text" id="scheme-name" maxlength="100" placeholder="如：双人轮流-15分钟换班">
+                </label>
+            </div>
+            <div class="form-row two-col">
+                <label class="form-group">
+                    <span class="form-label">参与人数 <em>*</em></span>
+                    <input type="number" id="scheme-workers" min="1" max="20" step="1" value="2">
+                </label>
+                <label class="form-group">
+                    <span class="form-label">分工方式 <em>*</em></span>
+                    <select id="scheme-mode">
+                        <option value="单人独立">单人独立</option>
+                        <option value="双人轮流">双人轮流</option>
+                        <option value="三人交替">三人交替</option>
+                        <option value="多人协同">多人协同</option>
+                        <option value="自定义">自定义</option>
+                    </select>
+                </label>
+            </div>
+            <div class="form-row two-col">
+                <label class="form-group">
+                    <span class="form-label">连续作业时长（分钟）</span>
+                    <input type="number" id="scheme-continuous" min="1" step="1" value="30">
+                </label>
+                <label class="form-group">
+                    <span class="form-label">休息间隔（分钟）</span>
+                    <input type="number" id="scheme-rest-interval" min="0" step="1" value="15">
+                    <small style="color:#888;">0表示无固定休息</small>
+                </label>
+            </div>
+            <div class="form-row two-col">
+                <label class="form-group">
+                    <span class="form-label">单次休息时长（分钟）</span>
+                    <input type="number" id="scheme-rest-duration" min="0" step="1" value="5">
+                </label>
+                <label class="form-group">
+                    <span class="form-label">是否轮班</span>
+                    <select id="scheme-shift">
+                        <option value="false">否</option>
+                        <option value="true">是</option>
+                    </select>
+                </label>
+            </div>
+            <div class="form-row two-col">
+                <label class="form-group">
+                    <span class="form-label">轮班时长（分钟）</span>
+                    <input type="number" id="scheme-shift-duration" min="0" step="1" value="0">
+                    <small style="color:#888;">0表示无轮班</small>
+                </label>
+                <label class="form-group">
+                    <span class="form-label">劳动强度</span>
+                    <select id="scheme-intensity">
+                        <option value="轻松">轻松</option>
+                        <option value="中等" selected>中等</option>
+                        <option value="较重">较重</option>
+                        <option value="繁重">繁重</option>
+                    </select>
+                </label>
+            </div>
+            <div class="form-row two-col">
+                <label class="form-group">
+                    <span class="form-label">基础疲劳系数</span>
+                    <input type="number" id="scheme-fatigue" min="0" max="1" step="0.01" value="0.1">
+                    <small style="color:#888;">0=无衰减，1=最大</small>
+                </label>
+                <label class="form-group">
+                    <span class="form-label">恢复速率</span>
+                    <input type="number" id="scheme-recovery" min="0.01" max="1" step="0.01" value="0.3">
+                    <small style="color:#888;">每分钟恢复比例</small>
+                </label>
+            </div>
+            <div class="form-row">
+                <label class="form-group">
+                    <span class="form-label">方案描述</span>
+                    <textarea id="scheme-description" rows="2" maxlength="500" placeholder="描述方案特点、适用场景等..."></textarea>
+                </label>
+            </div>
+            <div id="scheme-form-error" class="error-msg hidden"></div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn-secondary" onclick="closeLaborSchemeModal()">取消</button>
+            <button class="btn-primary" onclick="saveLaborScheme()">保存</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const SCENE_SEASONS = ['春季', '夏季', '秋季', '冬季'];
+const SCENE_TIMES = ['清晨', '上午', '正午', '下午', '傍晚', '夜间'];
+const SCENE_GROUNDS = ['干燥坚实', '微湿防滑', '泥泞湿滑', '结冰光滑', '沙石凹凸'];
+const WORK_MODES = ['单人独立', '双人轮流', '三人交替', '多人协同', '轮班制'];
+const SHIFT_MODES = ['无', '固定轮换', '自由轮换', '定额轮换'];
+
+let currentWellId = null;
+let currentSimId = null;
+let simChart = null;
+
+function initTabs() {
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const tab = btn.dataset.tab;
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            btn.classList.add('active');
+            document.getElementById(tab).classList.add('active');
+        });
+    });
+}
+
+function onWellChange() {
+    const wellId = document.getElementById('main-well-select').value;
+    currentWellId = wellId ? parseInt(wellId) : null;
+
+    loadWellConfigs();
+    loadSceneConfigs();
+    loadLaborSchemes();
+    loadSimHistory();
+    loadOptimizationReports();
+
+    if (!wellId) {
+        document.getElementById('scene-config-list').innerHTML = '<p class="empty-hint">请先选择古井以加载场景配置</p>';
+        document.getElementById('labor-scheme-list').innerHTML = '<p class="empty-hint">请先选择古井以加载劳作方案</p>';
+        document.getElementById('sim-history').innerHTML = '<p class="empty-hint">请先选择古井以加载历史记录</p>';
+        document.getElementById('opt-reports-list').innerHTML = '<p class="empty-hint">请先选择古井以加载优化报告</p>';
+    }
+}
+
+function loadWellConfigs() {
+    const sel = document.getElementById('main-config-select');
+    sel.innerHTML = '<option value="">使用默认参数</option>';
+    if (!currentWellId) return;
+
+    fetch(`/api/wells/${currentWellId}/configs`)
+        .then(r => r.json())
+        .then(data => {
+            data.configs.forEach(c => {
+                const opt = document.createElement('option');
+                opt.value = c.id;
+                opt.textContent = c.version + (c.is_active ? ' (当前)' : '');
+                if (c.is_active) opt.selected = true;
+                sel.appendChild(opt);
+            });
+        })
+        .catch(() => showToast('加载配置失败', 'error'));
+}
+
+function loadSceneConfigs() {
+    const list = document.getElementById('scene-config-list');
+    const simSel = document.getElementById('sim-scene-select');
+    const optCheck = document.getElementById('opt-scenes-checkboxes');
+
+    if (!currentWellId) return;
+
+    list.innerHTML = '<p class="empty-hint">加载中...</p>';
+
+    fetch(`/api/wells/${currentWellId}/scene-configs`)
+        .then(r => r.json())
+        .then(data => {
+            const configs = data.configs || [];
+
+            simSel.innerHTML = '<option value="">默认场景</option>';
+            configs.forEach(c => {
+                const opt = document.createElement('option');
+                opt.value = c.id;
+                opt.textContent = c.config_name;
+                simSel.appendChild(opt);
+            });
+
+            optCheck.innerHTML = '';
+            if (configs.length === 0) {
+                optCheck.innerHTML = '<span style="color:#999;">暂无场景配置</span>';
+            } else {
+                configs.forEach(c => {
+                    const label = document.createElement('label');
+                    label.style.display = 'block';
+                    label.style.marginBottom = '4px';
+                    label.innerHTML = `<input type="checkbox" value="${c.id}" class="opt-scene-cb"> ${c.config_name}`;
+                    optCheck.appendChild(label);
+                });
+            }
+
+            if (configs.length === 0) {
+                list.innerHTML = '<p class="empty-hint">暂无场景配置，点击上方按钮新增</p>';
+                return;
+            }
+
+            let html = '<table class="data-table"><thead><tr>';
+            html += '<th>场景名称</th><th>季节</th><th>时段</th><th>气温</th><th>地面</th><th>湿度</th><th>水位</th><th>预设</th><th>操作</th>';
+            html += '</tr></thead><tbody>';
+
+            configs.forEach(c => {
+                html += `<tr id="scene-row-${c.id}">`;
+                html += `<td><strong>${escapeHtml(c.config_name)}</strong></td>`;
+                html += `<td>${c.season || '-'}</td>`;
+                html += `<td>${c.time_of_day || '-'}</td>`;
+                html += `<td>${c.temperature_c !== null ? c.temperature_c + '°C' : '-'}</td>`;
+                html += `<td>${c.ground_condition || '-'}</td>`;
+                html += `<td>${c.humidity_pct !== null ? c.humidity_pct + '%' : '-'}</td>`;
+                html += `<td>${c.water_level_m !== null ? c.water_level_m + 'm' : '-'}</td>`;
+                html += `<td>${c.is_preset ? '✓' : '—'}</td>`;
+                html += `<td>
+                    <button class="btn-link" onclick="editSceneConfig(${c.id})">编辑</button>
+                    <button class="btn-link danger" onclick="deleteSceneConfig(${c.id})">删除</button>
+                </td>`;
+                html += '</tr>';
+            });
+
+            html += '</tbody></table>';
+            list.innerHTML = html;
+        })
+        .catch(() => {
+            list.innerHTML = '<p class="empty-hint">加载失败</p>';
+            showToast('加载场景配置失败', 'error');
+        });
+}
+
+function openSceneConfigModal() {
+    if (!currentWellId) {
+        showToast('请先选择古井', 'warning');
+        return;
+    }
+    document.getElementById('scene-edit-id').value = '';
+    document.getElementById('scene-modal-title').textContent = '新增场景配置';
+    document.getElementById('scene-name').value = '';
+    document.getElementById('scene-season').value = '春季';
+    document.getElementById('scene-time-of-day').value = '上午';
+    document.getElementById('scene-temperature').value = '25';
+    document.getElementById('scene-humidity').value = '60';
+    document.getElementById('scene-ground').value = '干燥坚实';
+    document.getElementById('scene-wind').value = '0';
+    document.getElementById('scene-water-level').value = '5.0';
+    document.getElementById('scene-description').value = '';
+    document.getElementById('scene-form-error').classList.add('hidden');
+    document.getElementById('scene-config-modal').classList.remove('hidden');
+}
+
+function closeSceneConfigModal() {
+    document.getElementById('scene-config-modal').classList.add('hidden');
+}
+
+function editSceneConfig(configId) {
+    fetch(`/api/wells/${currentWellId}/scene-configs`)
+        .then(r => r.json())
+        .then(data => {
+            const config = (data.configs || []).find(c => c.id === configId);
+            if (!config) return;
+
+            document.getElementById('scene-edit-id').value = configId;
+            document.getElementById('scene-modal-title').textContent = '编辑场景配置';
+            document.getElementById('scene-name').value = config.config_name;
+            document.getElementById('scene-season').value = config.season || '春季';
+            document.getElementById('scene-time-of-day').value = config.time_of_day || '上午';
+            document.getElementById('scene-temperature').value = config.temperature_c !== null ? config.temperature_c : 25;
+            document.getElementById('scene-humidity').value = config.humidity_pct !== null ? config.humidity_pct : 60;
+            document.getElementById('scene-ground').value = config.ground_condition || '干燥坚实';
+            document.getElementById('scene-wind').value = config.wind_level !== null ? config.wind_level : 0;
+            document.getElementById('scene-water-level').value = config.water_level_m !== null ? config.water_level_m : 5.0;
+            document.getElementById('scene-description').value = config.description || '';
+            document.getElementById('scene-form-error').classList.add('hidden');
+            document.getElementById('scene-config-modal').classList.remove('hidden');
+        });
+}
+
+function saveSceneConfig() {
+    const editId = document.getElementById('scene-edit-id').value;
+    const name = document.getElementById('scene-name').value.trim();
+    const errDiv = document.getElementById('scene-form-error');
+
+    if (!name) {
+        errDiv.textContent = '请输入场景名称';
+        errDiv.classList.remove('hidden');
+        return;
+    }
+
+    const body = {
+        config_name: name,
+        season: document.getElementById('scene-season').value,
+        time_of_day: document.getElementById('scene-time-of-day').value,
+        temperature_c: parseFloat(document.getElementById('scene-temperature').value),
+        humidity_pct: parseInt(document.getElementById('scene-humidity').value),
+        ground_condition: document.getElementById('scene-ground').value,
+        wind_level: parseInt(document.getElementById('scene-wind').value),
+        water_level_m: parseFloat(document.getElementById('scene-water-level').value),
+        description: document.getElementById('scene-description').value.trim()
+    };
+
+    let url = `/api/wells/${currentWellId}/scene-configs`;
+    let method = 'POST';
+
+    if (editId) {
+        url = `/api/scene-configs/${editId}`;
+        method = 'PUT';
+    }
+
+    fetch(url, {
+        method: method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            closeSceneConfigModal();
+            loadSceneConfigs();
+            showToast(editId ? '场景配置已更新' : '场景配置已创建', 'success');
+        } else {
+            errDiv.textContent = data.error || '保存失败';
+            errDiv.classList.remove('hidden');
+        }
+    })
+    .catch(() => {
+        errDiv.textContent = '网络错误，请重试';
+        errDiv.classList.remove('hidden');
+    });
+}
+
+function deleteSceneConfig(configId) {
+    if (!confirm('确定要删除这个场景配置吗？')) return;
+
+    fetch(`/api/scene-configs/${configId}/delete`, { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                loadSceneConfigs();
+                showToast('场景配置已删除', 'success');
+            } else {
+                showToast('删除失败', 'error');
+            }
+        })
+        .catch(() => showToast('删除失败', 'error'));
+}
+
+function loadLaborSchemes() {
+    const list = document.getElementById('labor-scheme-list');
+    const simSel = document.getElementById('sim-scheme-select');
+    const optCheck = document.getElementById('opt-schemes-checkboxes');
+
+    if (!currentWellId) return;
+
+    list.innerHTML = '<p class="empty-hint">加载中...</p>';
+
+    fetch(`/api/wells/${currentWellId}/labor-schemes`)
+        .then(r => r.json())
+        .then(data => {
+            const schemes = data.schemes || [];
+
+            simSel.innerHTML = '<option value="">默认方案（单人独立）</option>';
+            schemes.forEach(s => {
+                const opt = document.createElement('option');
+                opt.value = s.id;
+                opt.textContent = s.scheme_name + ` (${s.worker_count}人)`;
+                simSel.appendChild(opt);
+            });
+
+            optCheck.innerHTML = '';
+            if (schemes.length === 0) {
+                optCheck.innerHTML = '<span style="color:#999;">暂无劳作方案</span>';
+            } else {
+                schemes.forEach(s => {
+                    const label = document.createElement('label');
+                    label.style.display = 'block';
+                    label.style.marginBottom = '4px';
+                    label.innerHTML = `<input type="checkbox" value="${s.id}" class="opt-scheme-cb"> ${s.scheme_name} (${s.worker_count}人)`;
+                    optCheck.appendChild(label);
+                });
+            }
+
+            if (schemes.length === 0) {
+                list.innerHTML = '<p class="empty-hint">暂无劳作方案，点击上方按钮新增</p>';
+                return;
+            }
+
+            let html = '<table class="data-table"><thead><tr>';
+            html += '<th>方案名称</th><th>人数</th><th>分工方式</th><th>连续作业</th><th>休息间隔</th>';
+            html += '<th>疲劳系数</th><th>恢复速率</th><th>强度</th><th>操作</th>';
+            html += '</tr></thead><tbody>';
+
+            schemes.forEach(s => {
+                html += `<tr id="scheme-row-${s.id}">`;
+                html += `<td><strong>${escapeHtml(s.scheme_name)}</strong></td>`;
+                html += `<td>${s.worker_count}</td>`;
+                html += `<td>${s.work_mode || '-'}</td>`;
+                html += `<td>${s.continuous_duration_min || '-'}min</td>`;
+                html += `<td>${s.rest_interval_min || '-'}min</td>`;
+                html += `<td>${s.base_fatigue_factor !== null ? s.base_fatigue_factor.toFixed(2) : '-'}</td>`;
+                html += `<td>${s.recovery_rate !== null ? s.recovery_rate.toFixed(2) : '-'}</td>`;
+                html += `<td>${s.workload_intensity !== null ? s.workload_intensity : '-'}</td>`;
+                html += `<td>
+                    <button class="btn-link" onclick="editLaborScheme(${s.id})">编辑</button>
+                    <button class="btn-link danger" onclick="deleteLaborScheme(${s.id})">删除</button>
+                </td>`;
+                html += '</tr>';
+            });
+
+            html += '</tbody></table>';
+            list.innerHTML = html;
+        })
+        .catch(() => {
+            list.innerHTML = '<p class="empty-hint">加载失败</p>';
+            showToast('加载劳作方案失败', 'error');
+        });
+}
+
+function openLaborSchemeModal() {
+    if (!currentWellId) {
+        showToast('请先选择古井', 'warning');
+        return;
+    }
+    document.getElementById('scheme-edit-id').value = '';
+    document.getElementById('scheme-modal-title').textContent = '新增劳作方案';
+    document.getElementById('scheme-name').value = '';
+    document.getElementById('scheme-workers').value = '2';
+    document.getElementById('scheme-mode').value = '双人轮流';
+    document.getElementById('scheme-continuous').value = '30';
+    document.getElementById('scheme-rest-interval').value = '15';
+    document.getElementById('scheme-rest-duration').value = '5';
+    document.getElementById('scheme-shift').value = 'false';
+    document.getElementById('scheme-shift-duration').value = '15';
+    document.getElementById('scheme-intensity').value = '中等';
+    document.getElementById('scheme-fatigue').value = '0.1';
+    document.getElementById('scheme-recovery').value = '0.3';
+    document.getElementById('scheme-description').value = '';
+    document.getElementById('scheme-form-error').classList.add('hidden');
+    document.getElementById('labor-scheme-modal').classList.remove('hidden');
+}
+
+function closeLaborSchemeModal() {
+    document.getElementById('labor-scheme-modal').classList.add('hidden');
+}
+
+function editLaborScheme(schemeId) {
+    fetch(`/api/wells/${currentWellId}/labor-schemes`)
+        .then(r => r.json())
+        .then(data => {
+            const scheme = (data.schemes || []).find(s => s.id === schemeId);
+            if (!scheme) return;
+
+            document.getElementById('scheme-edit-id').value = schemeId;
+            document.getElementById('scheme-modal-title').textContent = '编辑劳作方案';
+            document.getElementById('scheme-name').value = scheme.scheme_name;
+            document.getElementById('scheme-workers').value = scheme.worker_count;
+            document.getElementById('scheme-mode').value = scheme.work_mode || '单人独立';
+            document.getElementById('scheme-continuous').value = scheme.continuous_duration_min || 30;
+            document.getElementById('scheme-rest-interval').value = scheme.rest_interval_min || 0;
+            document.getElementById('scheme-rest-duration').value = scheme.rest_duration_min || 0;
+            document.getElementById('scheme-shift').value = scheme.shift_rotation ? 'true' : 'false';
+            document.getElementById('scheme-shift-duration').value = scheme.shift_duration_min || 15;
+            document.getElementById('scheme-intensity').value = scheme.workload_intensity || '中等';
+            document.getElementById('scheme-fatigue').value = scheme.base_fatigue_factor !== null ? scheme.base_fatigue_factor : 0.1;
+            document.getElementById('scheme-recovery').value = scheme.recovery_rate !== null ? scheme.recovery_rate : 0.3;
+            document.getElementById('scheme-description').value = scheme.description || '';
+            document.getElementById('scheme-form-error').classList.add('hidden');
+            document.getElementById('labor-scheme-modal').classList.remove('hidden');
+        });
+}
+
+function saveLaborScheme() {
+    const editId = document.getElementById('scheme-edit-id').value;
+    const name = document.getElementById('scheme-name').value.trim();
+    const errDiv = document.getElementById('scheme-form-error');
+
+    if (!name) {
+        errDiv.textContent = '请输入方案名称';
+        errDiv.classList.remove('hidden');
+        return;
+    }
+
+    const body = {
+        scheme_name: name,
+        worker_count: parseInt(document.getElementById('scheme-workers').value),
+        work_mode: document.getElementById('scheme-mode').value,
+        continuous_duration_min: parseFloat(document.getElementById('scheme-continuous').value),
+        rest_interval_min: parseFloat(document.getElementById('scheme-rest-interval').value),
+        rest_duration_min: parseFloat(document.getElementById('scheme-rest-duration').value),
+        shift_rotation: document.getElementById('scheme-shift').value === 'true',
+        shift_duration_min: parseFloat(document.getElementById('scheme-shift-duration').value),
+        workload_intensity: document.getElementById('scheme-intensity').value,
+        base_fatigue_factor: parseFloat(document.getElementById('scheme-fatigue').value),
+        recovery_rate: parseFloat(document.getElementById('scheme-recovery').value),
+        description: document.getElementById('scheme-description').value.trim()
+    };
+
+    let url = `/api/wells/${currentWellId}/labor-schemes`;
+    let method = 'POST';
+
+    if (editId) {
+        url = `/api/labor-schemes/${editId}`;
+        method = 'PUT';
+    }
+
+    fetch(url, {
+        method: method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            closeLaborSchemeModal();
+            loadLaborSchemes();
+            showToast(editId ? '劳作方案已更新' : '劳作方案已创建', 'success');
+        } else {
+            errDiv.textContent = data.error || '保存失败';
+            errDiv.classList.remove('hidden');
+        }
+    })
+    .catch(() => {
+        errDiv.textContent = '网络错误，请重试';
+        errDiv.classList.remove('hidden');
+    });
+}
+
+function deleteLaborScheme(schemeId) {
+    if (!confirm('确定要删除这个劳作方案吗？')) return;
+
+    fetch(`/api/labor-schemes/${schemeId}/delete`, { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                loadLaborSchemes();
+                showToast('劳作方案已删除', 'success');
+            } else {
+                showToast('删除失败', 'error');
+            }
+        })
+        .catch(() => showToast('删除失败', 'error'));
+}
+
+function runSimulation() {
+    if (!currentWellId) {
+        showToast('请先选择古井', 'warning');
+        return;
+    }
+
+    const errDiv = document.getElementById('sim-error');
+    const btn = document.getElementById('run-sim-btn');
+
+    const name = document.getElementById('sim-name').value.trim() || '模拟实验';
+    const sceneId = document.getElementById('sim-scene-select').value || null;
+    const schemeId = document.getElementById('sim-scheme-select').value || null;
+    const configId = document.getElementById('main-config-select').value || null;
+    const duration = parseFloat(document.getElementById('sim-duration').value);
+    const step = parseFloat(document.getElementById('sim-step').value);
+
+    if (duration <= 0 || step <= 0) {
+        errDiv.textContent = '模拟时长和时间步长必须大于0';
+        errDiv.classList.remove('hidden');
+        return;
+    }
+
+    errDiv.classList.add('hidden');
+    btn.disabled = true;
+    btn.textContent = '⏳ 模拟中...';
+
+    fetch(`/api/wells/${currentWellId}/simulate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            simulation_name: name,
+            scene_config_id: sceneId ? parseInt(sceneId) : null,
+            labor_scheme_id: schemeId ? parseInt(schemeId) : null,
+            config_id: configId ? parseInt(configId) : null,
+            simulation_duration_min: duration,
+            time_step_min: step
+        })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            currentSimId = data.simulation_id;
+            loadSimulationDetail(data.simulation_id);
+            loadSimHistory();
+            showToast('模拟完成', 'success');
+        } else {
+            errDiv.textContent = data.error || '模拟失败';
+            errDiv.classList.remove('hidden');
+        }
+    })
+    .catch(() => {
+        errDiv.textContent = '网络错误，请重试';
+        errDiv.classList.remove('hidden');
+    })
+    .finally(() => {
+        btn.disabled = false;
+        btn.textContent = '🚀 运行模拟';
+    });
+}
+
+function loadSimulationDetail(simId) {
+    fetch(`/api/simulations/${simId}`)
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success) return;
+
+            const resultDiv = document.getElementById('sim-result');
+            let html = '';
+            html += `<div style="display:grid; grid-template-columns:1fr 1fr; gap:8px 16px;">`;
+            html += `<div><span style="color:#666;">总出水量：</span><strong style="color:#2D5A27;">${data.total_water_l.toFixed(1)} L</strong></div>`;
+            html += `<div><span style="color:#666;">平均流量：</span><strong>${data.avg_flow_rate_lpm.toFixed(2)} L/min</strong></div>`;
+            html += `<div><span style="color:#666;">峰值流量：</span><strong>${data.peak_flow_rate_lpm.toFixed(2)} L/min</strong></div>`;
+            html += `<div><span style="color:#666;">人均流量：</span><strong>${data.per_capita_flow_lpm.toFixed(2)} L/min/人</strong></div>`;
+            html += `<div><span style="color:#666;">效率衰减：</span><strong style="color:${data.efficiency_decay_pct > 30 ? '#c0392b' : '#e67e22'};">${data.efficiency_decay_pct.toFixed(1)}%</strong></div>`;
+            html += `<div><span style="color:#666;">最终疲劳：</span><strong style="color:${data.final_fatigue_level > 0.7 ? '#c0392b' : '#e67e22'};">${(data.final_fatigue_level * 100).toFixed(1)}%</strong></div>`;
+            html += `<div><span style="color:#666;">工作时长：</span><strong>${data.total_work_min.toFixed(0)} min</strong></div>`;
+            html += `<div><span style="color:#666;">休息时长：</span><strong>${data.total_rest_min.toFixed(0)} min</strong></div>`;
+            html += `<div><span style="color:#666;">劳息比：</span><strong>${data.work_rest_ratio.toFixed(2)}</strong></div>`;
+            html += `<div><span style="color:#666;">稳定性CV：</span><strong>${(data.stability_cv * 100).toFixed(1)}%</strong></div>`;
+            html += `</div>`;
+            html += `<div style="margin-top:12px; padding:10px; background:linear-gradient(135deg, #E8F5E9, #C8E6C9); border-radius:8px; text-align:center;">`;
+            html += `<div style="font-size:12px; color:#2D5A27; margin-bottom:4px;">综合评分</div>`;
+            html += `<div style="font-size:32px; font-weight:bold; color:#2D5A27; font-family:'Noto Serif SC';">${data.overall_score.toFixed(1)}</div>`;
+            html += `</div>`;
+            resultDiv.innerHTML = html;
+
+            drawSimChart(data);
+        })
+        .catch(() => showToast('加载模拟详情失败', 'error'));
+}
+
+function drawSimChart(data) {
+    const chartDiv = document.getElementById('sim-chart');
+    const timePoints = data.time_points || [];
+
+    if (timePoints.length === 0) {
+        chartDiv.innerHTML = '<p class="empty-hint">无数据</p>';
+        return;
+    }
+
+    const x = timePoints.map(t => t.elapsed_min);
+    const flow = timePoints.map(t => t.instantaneous_flow_lpm);
+    const total = timePoints.map(t => t.total_water_l);
+    const fatigue = timePoints.map(t => t.avg_fatigue_level * 100);
+    const active = timePoints.map(t => t.active_worker_count);
+
+    const trace1 = {
+        x: x, y: flow,
+        name: '瞬时流量 (L/min)',
+        type: 'scatter', mode: 'lines',
+        yaxis: 'y1',
+        line: { color: '#2D5A27', width: 2 }
+    };
+
+    const trace2 = {
+        x: x, y: total,
+        name: '累计出水量 (L)',
+        type: 'scatter', mode: 'lines',
+        yaxis: 'y2',
+        line: { color: '#8B4513', width: 2 }
+    };
+
+    const trace3 = {
+        x: x, y: fatigue,
+        name: '平均疲劳度 (%)',
+        type: 'scatter', mode: 'lines',
+        yaxis: 'y3',
+        line: { color: '#e74c3c', width: 2, dash: 'dash' }
+    };
+
+    const layout = {
+        title: data.simulation_name + ' - 模拟过程曲线',
+        xaxis: { title: '时间 (分钟)', gridcolor: '#eee' },
+        yaxis: { title: '流量 (L/min)', side: 'left', gridcolor: '#eee' },
+        yaxis2: { title: '累计水量 (L)', side: 'right', overlaying: 'y', showgrid: false },
+        yaxis3: { title: '疲劳度 (%)', side: 'right', overlaying: 'y', position: 0.95, showgrid: false },
+        legend: { orientation: 'h', y: -0.2 },
+        margin: { l: 60, r: 80, t: 50, b: 60 },
+        plot_bgcolor: '#FFFBF5',
+        paper_bgcolor: '#FFFBF5',
+        font: { family: 'Noto Sans SC' }
+    };
+
+    Plotly.newPlot('sim-chart', [trace1, trace2, trace3], layout, { responsive: true });
+}
+
+function loadSimHistory() {
+    const list = document.getElementById('sim-history');
+    if (!currentWellId) return;
+
+    list.innerHTML = '<p class="empty-hint">加载中...</p>';
+
+    fetch(`/api/wells/${currentWellId}/simulations`)
+        .then(r => r.json())
+        .then(data => {
+            const sims = data.simulations || [];
+            if (sims.length === 0) {
+                list.innerHTML = '<p class="empty-hint">暂无模拟记录</p>';
+                return;
+            }
+
+            let html = '<table class="data-table"><thead><tr>';
+            html += '<th>模拟名称</th><th>总出水量</th><th>平均流量</th><th>人均流量</th>';
+            html += '<th>效率衰减</th><th>最终疲劳</th><th>综合评分</th><th>创建时间</th><th>操作</th>';
+            html += '</tr></thead><tbody>';
+
+            sims.forEach(s => {
+                html += `<tr id="sim-row-${s.id}">`;
+                html += `<td><strong>${escapeHtml(s.simulation_name)}</strong></td>`;
+                html += `<td>${s.total_water_l.toFixed(1)} L</td>`;
+                html += `<td>${s.avg_flow_rate_lpm.toFixed(2)} L/min</td>`;
+                html += `<td>${s.per_capita_flow_lpm.toFixed(2)}</td>`;
+                html += `<td style="color:${s.efficiency_decay_pct > 30 ? '#c0392b' : 'inherit'};">${s.efficiency_decay_pct.toFixed(1)}%</td>`;
+                html += `<td style="color:${s.final_fatigue_level > 0.7 ? '#c0392b' : 'inherit'};">${(s.final_fatigue_level * 100).toFixed(1)}%</td>`;
+                html += `<td><strong style="color:#2D5A27;">${s.overall_score.toFixed(1)}</strong></td>`;
+                html += `<td style="color:#888; font-size:12px;">${s.created_at || '-'}</td>`;
+                html += `<td>
+                    <button class="btn-link" onclick="viewSimulation(${s.id})">查看</button>
+                    <button class="btn-link danger" onclick="deleteSimulation(${s.id})">删除</button>
+                </td>`;
+                html += '</tr>';
+            });
+
+            html += '</tbody></table>';
+            list.innerHTML = html;
+        })
+        .catch(() => {
+            list.innerHTML = '<p class="empty-hint">加载失败</p>';
+        });
+}
+
+function viewSimulation(simId) {
+    currentSimId = simId;
+    loadSimulationDetail(simId);
+    document.querySelector('[data-tab="tab-simulate"]').click();
+}
+
+function deleteSimulation(simId) {
+    if (!confirm('确定要删除这条模拟记录吗？')) return;
+
+    fetch(`/api/simulations/${simId}/delete`, { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                loadSimHistory();
+                if (currentSimId === simId) {
+                    document.getElementById('sim-result').innerHTML = '<p class="empty-hint">运行模拟后查看结果</p>';
+                    document.getElementById('sim-chart').innerHTML = '<p class="empty-hint">运行模拟后生成曲线图</p>';
+                    currentSimId = null;
+                }
+                showToast('模拟记录已删除', 'success');
+            } else {
+                showToast('删除失败', 'error');
+            }
+        })
+        .catch(() => showToast('删除失败', 'error'));
+}
+
+function generateOptimizationReport() {
+    if (!currentWellId) {
+        showToast('请先选择古井', 'warning');
+        return;
+    }
+
+    const errDiv = document.getElementById('opt-error');
+    const btn = document.getElementById('gen-opt-btn');
+
+    const title = document.getElementById('opt-title').value.trim();
+    const author = document.getElementById('opt-author').value.trim();
+    const summary = document.getElementById('opt-summary').value.trim();
+    const duration = parseFloat(document.getElementById('opt-duration').value);
+    const step = parseFloat(document.getElementById('opt-step').value);
+
+    const sceneIds = [];
+    document.querySelectorAll('.opt-scene-cb:checked').forEach(cb => {
+        sceneIds.push(parseInt(cb.value));
+    });
+
+    const schemeIds = [];
+    document.querySelectorAll('.opt-scheme-cb:checked').forEach(cb => {
+        schemeIds.push(parseInt(cb.value));
+    });
+
+    if (!title) {
+        errDiv.textContent = '请输入报告标题';
+        errDiv.classList.remove('hidden');
+        return;
+    }
+    if (sceneIds.length === 0) {
+        errDiv.textContent = '请至少选择一个场景';
+        errDiv.classList.remove('hidden');
+        return;
+    }
+    if (schemeIds.length === 0) {
+        errDiv.textContent = '请至少选择一个劳作方案';
+        errDiv.classList.remove('hidden');
+        return;
+    }
+    if (duration <= 0 || step <= 0) {
+        errDiv.textContent = '模拟时长和时间步长必须大于0';
+        errDiv.classList.remove('hidden');
+        return;
+    }
+
+    errDiv.classList.add('hidden');
+    btn.disabled = true;
+    btn.textContent = '⏳ 生成报告中...';
+
+    const configId = document.getElementById('main-config-select').value || null;
+
+    fetch(`/api/wells/${currentWellId}/optimization-reports`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            report_title: title,
+            author: author,
+            summary: summary,
+            scene_config_ids: sceneIds,
+            labor_scheme_ids: schemeIds,
+            config_id: configId ? parseInt(configId) : null,
+            simulation_duration_min: duration,
+            time_step_min: step
+        })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            loadOptimizationReports();
+            showToast('优化报告已生成', 'success');
+            window.location.href = `/scene-optimization/reports/${data.report_id}`;
+        } else {
+            errDiv.textContent = data.error || '生成失败';
+            errDiv.classList.remove('hidden');
+        }
+    })
+    .catch(() => {
+        errDiv.textContent = '网络错误，请重试';
+        errDiv.classList.remove('hidden');
+    })
+    .finally(() => {
+        btn.disabled = false;
+        btn.textContent = '📋 生成优化报告';
+    });
+}
+
+function loadOptimizationReports() {
+    const list = document.getElementById('opt-reports-list');
+    if (!currentWellId) return;
+
+    list.innerHTML = '<p class="empty-hint">加载中...</p>';
+
+    fetch(`/api/wells/${currentWellId}/optimization-reports`)
+        .then(r => r.json())
+        .then(data => {
+            const reports = data.reports || [];
+            if (reports.length === 0) {
+                list.innerHTML = '<p class="empty-hint">暂无优化报告</p>';
+                return;
+            }
+
+            let html = '<table class="data-table"><thead><tr>';
+            html += '<th>报告标题</th><th>最佳方案</th><th>场景数</th><th>方案数</th><th>最优人数</th><th>创建时间</th><th>操作</th>';
+            html += '</tr></thead><tbody>';
+
+            reports.forEach(r => {
+                html += `<tr id="opt-report-row-${r.id}">`;
+                html += `<td><strong>${escapeHtml(r.report_title)}</strong></td>`;
+                html += `<td>${r.best_scheme_name || '-'}</td>`;
+                html += `<td>${r.scene_count || 0}</td>`;
+                html += `<td>${r.scheme_count || 0}</td>`;
+                html += `<td>${r.optimal_worker_count !== null ? r.optimal_worker_count + '人' : '-'}</td>`;
+                html += `<td style="color:#888; font-size:12px;">${r.created_at || '-'}</td>`;
+                html += `<td>
+                    <button class="btn-link" onclick="window.location.href='/scene-optimization/reports/${r.id}'">查看</button>
+                    <button class="btn-link danger" onclick="deleteOptimizationReport(${r.id})">删除</button>
+                </td>`;
+                html += '</tr>';
+            });
+
+            html += '</tbody></table>';
+            list.innerHTML = html;
+        })
+        .catch(() => {
+            list.innerHTML = '<p class="empty-hint">加载失败</p>';
+        });
+}
+
+function deleteOptimizationReport(reportId) {
+    if (!confirm('确定要删除这份优化报告吗？')) return;
+
+    fetch(`/api/optimization-reports/${reportId}/delete`, { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                loadOptimizationReports();
+                showToast('优化报告已删除', 'success');
+            } else {
+                showToast('删除失败', 'error');
+            }
+        })
+        .catch(() => showToast('删除失败', 'error'));
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.appendChild(document.createTextNode(text));
+    return div.innerHTML;
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    initTabs();
+});
+</script>
+{% endblock %}

@@ -1,0 +1,255 @@
+{% extends "base.html" %}
+
+{% block title %}{{ report.report_title }} - 场景优化复原报告{% endblock %}
+
+{% block content %}
+<div class="page-header" style="padding:24px 32px; background:linear-gradient(135deg, #2D5A27 0%, #1A3A1A 100%); color:#F0F8EA;">
+    <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+        <div>
+            <h1 style="margin:0 0 8px 0; font-family:'Noto Serif SC'; font-size:28px;">📊 {{ report.report_title }}</h1>
+            <p style="margin:0; opacity:0.9; font-size:14px;">
+                {% if report.author %}分析人员：{{ report.author }} · {% endif %}
+                创建时间：{{ report.created_at.strftime('%Y-%m-%d %H:%M') if report.created_at else '-' }}
+            </p>
+            <p style="margin:4px 0 0 0; opacity:0.85; font-size:13px;">
+                古井：{{ well.name if well else '未知' }} · 
+                场景数：{{ report.scene_count or 0 }} · 
+                方案数：{{ report.scheme_count or 0 }}
+            </p>
+        </div>
+        <div style="text-align:right;">
+            <button class="btn-secondary" onclick="window.print()" style="color:#333;">🖨️ 打印报告</button>
+        </div>
+    </div>
+</div>
+
+<div style="padding:24px 32px; max-width:1200px; margin:0 auto;">
+
+    {% if report.summary %}
+    <div class="panel" style="margin-bottom:20px;">
+        <div class="panel-header">
+            <h3>📝 研究说明</h3>
+        </div>
+        <div style="padding:0 20px 20px 20px; line-height:1.8;">
+            {{ report.summary | replace('\n', '<br>') | safe }}
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="panel" style="margin-bottom:20px;">
+        <div class="panel-header">
+            <h3>🏆 核心结论</h3>
+        </div>
+        <div style="padding:20px;">
+            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:16px;">
+                <div style="padding:16px; background:linear-gradient(135deg, #E8F5E9, #C8E6C9); border-radius:12px; text-align:center;">
+                    <div style="font-size:13px; color:#2D5A27; margin-bottom:4px;">最佳方案</div>
+                    <div style="font-size:20px; font-weight:bold; color:#2D5A27; font-family:'Noto Serif SC';">
+                        {{ report.best_scheme_name or '-' }}
+                    </div>
+                </div>
+                <div style="padding:16px; background:linear-gradient(135deg, #FFF3E0, #FFE0B2); border-radius:12px; text-align:center;">
+                    <div style="font-size:13px; color:#E65100; margin-bottom:4px;">最优人数</div>
+                    <div style="font-size:20px; font-weight:bold; color:#E65100; font-family:'Noto Serif SC';">
+                        {{ report.optimal_worker_count ~ '人' if report.optimal_worker_count else '-' }}
+                    </div>
+                </div>
+                <div style="padding:16px; background:linear-gradient(135deg, #E3F2FD, #BBDEFB); border-radius:12px; text-align:center;">
+                    <div style="font-size:13px; color:#1565C0; margin-bottom:4px;">推荐分工</div>
+                    <div style="font-size:20px; font-weight:bold; color:#1565C0; font-family:'Noto Serif SC';">
+                        {{ report.optimal_work_mode or '-' }}
+                    </div>
+                </div>
+                <div style="padding:16px; background:linear-gradient(135deg, #F3E5F5, #E1BEE7); border-radius:12px; text-align:center;">
+                    <div style="font-size:13px; color:#7B1FA2; margin-bottom:4px;">休息节奏</div>
+                    <div style="font-size:16px; font-weight:bold; color:#7B1FA2; font-family:'Noto Serif SC';">
+                        {{ report.suggested_rest_rhythm or '-' }}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {% if report.recommendation %}
+    <div class="panel" style="margin-bottom:20px;">
+        <div class="panel-header">
+            <h3>💡 优化建议</h3>
+        </div>
+        <div style="padding:0 20px 20px 20px; line-height:1.8;">
+            {{ report.recommendation | replace('\n', '<br>') | safe }}
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="panel" style="margin-bottom:20px;">
+        <div class="panel-header">
+            <h3>📈 综合对比图</h3>
+        </div>
+        <div id="comparison-chart" style="height:450px; padding:10px;"></div>
+    </div>
+
+    <div class="panel" style="margin-bottom:20px;">
+        <div class="panel-header">
+            <h3>📋 方案排名</h3>
+        </div>
+        <div class="table-wrapper">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>排名</th>
+                        <th>场景</th>
+                        <th>方案</th>
+                        <th>平均流量</th>
+                        <th>人均流量</th>
+                        <th>效率衰减</th>
+                        <th>综合评分</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% set sorted_items = report.items | sort(attribute='ranking') %}
+                    {% for item in sorted_items %}
+                    <tr>
+                        <td>
+                            {% if item.ranking == 1 %}🥇
+                            {% elif item.ranking == 2 %}🥈
+                            {% elif item.ranking == 3 %}🥉
+                            {% else %}{{ item.ranking }}
+                            {% endif %}
+                        </td>
+                        <td><strong>{{ item.scene_name }}</strong></td>
+                        <td>{{ item.scheme_name }}</td>
+                        <td>{{ "%.2f"|format(item.avg_flow_rate_lpm) }} L/min</td>
+                        <td>{{ "%.2f"|format(item.per_capita_flow_lpm) }}</td>
+                        <td style="color:{{ '#c0392b' if item.efficiency_decay_pct > 30 else 'inherit' }};">
+                            {{ "%.1f"|format(item.efficiency_decay_pct) }}%
+                        </td>
+                        <td><strong style="color:#2D5A27;">{{ "%.1f"|format(item.overall_score) }}</strong></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    {% if report.conclusions %}
+    <div class="panel" style="margin-bottom:20px;">
+        <div class="panel-header">
+            <h3>🔬 研究结论</h3>
+        </div>
+        <div style="padding:0 20px 20px 20px; line-height:1.8;">
+            {{ report.conclusions | replace('\n', '<br>') | safe }}
+        </div>
+    </div>
+    {% endif %}
+
+    {% if report.report_content %}
+    <div class="panel">
+        <div class="panel-header">
+            <h3>📄 详细报告</h3>
+        </div>
+        <div style="padding:0 20px 20px 20px; line-height:1.8; white-space:pre-wrap; font-family:'Noto Serif SC';">
+{{ report.report_content }}
+        </div>
+    </div>
+    {% endif %}
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const items = [
+        {% set sorted_items = report.items | sort(attribute='ranking') %}
+        {% for item in sorted_items %}
+        {
+            label: "{{ item.scene_name }} - {{ item.scheme_name }}",
+            score: {{ item.overall_score }},
+            flow: {{ item.avg_flow_rate_lpm }},
+            perCapita: {{ item.per_capita_flow_lpm }},
+            decay: {{ item.efficiency_decay_pct }}
+        }{% if not loop.last %},{% endif %}
+        {% endfor %}
+    ];
+
+    const labels = items.map(i => i.label);
+
+    const trace1 = {
+        x: labels,
+        y: items.map(i => i.score),
+        name: '综合评分',
+        type: 'bar',
+        marker: { color: '#2D5A27' },
+        yaxis: 'y1',
+        text: items.map(i => i.score.toFixed(1)),
+        textposition: 'auto'
+    };
+
+    const trace2 = {
+        x: labels,
+        y: items.map(i => i.flow),
+        name: '平均流量 (L/min)',
+        type: 'scatter',
+        mode: 'lines+markers',
+        yaxis: 'y2',
+        line: { color: '#8B4513', width: 2 },
+        marker: { size: 8 }
+    };
+
+    const trace3 = {
+        x: labels,
+        y: items.map(i => i.decay),
+        name: '效率衰减 (%)',
+        type: 'scatter',
+        mode: 'lines+markers',
+        yaxis: 'y3',
+        line: { color: '#e74c3c', width: 2, dash: 'dash' },
+        marker: { size: 8 }
+    };
+
+    const layout = {
+        title: '各方案综合对比',
+        xaxis: {
+            title: '场景-方案组合',
+            tickangle: -30,
+            gridcolor: '#eee'
+        },
+        yaxis: {
+            title: '综合评分',
+            side: 'left',
+            gridcolor: '#eee',
+            range: [0, 100]
+        },
+        yaxis2: {
+            title: '流量 (L/min)',
+            side: 'right',
+            overlaying: 'y',
+            showgrid: false
+        },
+        yaxis3: {
+            title: '衰减率 (%)',
+            side: 'right',
+            overlaying: 'y',
+            position: 0.92,
+            showgrid: false
+        },
+        legend: { orientation: 'h', y: -0.3 },
+        margin: { l: 60, r: 100, t: 50, b: 120 },
+        plot_bgcolor: '#FFFBF5',
+        paper_bgcolor: '#FFFBF5',
+        font: { family: 'Noto Sans SC' }
+    };
+
+    Plotly.newPlot('comparison-chart', [trace1, trace2, trace3], layout, { responsive: true });
+});
+</script>
+
+<style>
+@media print {
+    .site-header, .site-footer, #toast-container { display: none !important; }
+    .main-content { padding: 0 !important; }
+    .page-header { background: #2D5A27 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .panel { break-inside: avoid; }
+}
+</style>
+{% endblock %}

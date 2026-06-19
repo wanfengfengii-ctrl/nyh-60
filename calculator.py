@@ -1,5 +1,6 @@
 import math
-from typing import List, Tuple, Optional
+from datetime import datetime
+from typing import List, Tuple, Optional, Dict, Any
 from models import Experiment, TimePoint, WellConfig
 
 
@@ -522,3 +523,498 @@ def calculate_multi_round_comparison(experiments_data: List[dict]) -> dict:
         ],
         "recommendations": recommendations
     }
+
+
+def calculate_scene_environment_factor(scene_config) -> float:
+    base_factor = 1.0
+
+    season_factors = {
+        "春季": 1.02,
+        "夏季": 0.92,
+        "秋季": 1.05,
+        "冬季": 0.88
+    }
+    season = getattr(scene_config, 'season', '春季')
+    base_factor *= season_factors.get(season, 1.0)
+
+    temp = getattr(scene_config, 'temperature_c', 20.0)
+    if temp < 0:
+        temp_factor = 0.85 + temp * 0.01
+    elif temp < 15:
+        temp_factor = 0.95 + (temp - 0) * 0.003
+    elif temp < 28:
+        temp_factor = 1.0
+    else:
+        temp_factor = max(0.7, 1.0 - (temp - 28) * 0.02)
+    base_factor *= max(0.5, temp_factor)
+
+    time_factors = {
+        "清晨": 1.05,
+        "上午": 1.02,
+        "正午": 0.9,
+        "下午": 0.95,
+        "傍晚": 0.98,
+        "夜间": 0.8
+    }
+    time_of_day = getattr(scene_config, 'time_of_day', '上午')
+    base_factor *= time_factors.get(time_of_day, 1.0)
+
+    ground_factors = {
+        "干燥坚实": 1.0,
+        "微湿防滑": 0.92,
+        "泥泞湿滑": 0.82,
+        "结冰光滑": 0.75,
+        "沙石凹凸": 0.88
+    }
+    ground = getattr(scene_config, 'ground_condition', '干燥坚实')
+    base_factor *= ground_factors.get(ground, 1.0)
+
+    humidity = getattr(scene_config, 'humidity_pct', 50.0)
+    if humidity > 70:
+        humidity_factor = max(0.85, 1.0 - (humidity - 70) * 0.005)
+    elif humidity < 30:
+        humidity_factor = max(0.9, 1.0 - (30 - humidity) * 0.003)
+    else:
+        humidity_factor = 1.0
+    base_factor *= humidity_factor
+
+    wind = getattr(scene_config, 'wind_level', 0)
+    wind_factor = max(0.7, 1.0 - wind * 0.025)
+    base_factor *= wind_factor
+
+    water_level = getattr(scene_config, 'water_level_m', 0.0)
+    if water_level > 0:
+        water_level_factor = max(0.8, 1.0 - water_level * 0.03)
+    else:
+        water_level_factor = 1.0
+    base_factor *= water_level_factor
+
+    return round(base_factor, 4)
+
+
+def calculate_base_flow_rate(well_config, worker_count: int, work_mode: str) -> float:
+    if well_config is None:
+        return 15.0 * worker_count
+
+    target_rpm = 15.0
+    flow_per_worker = rpm_to_flow_rate(target_rpm, well_config)
+
+    mode_efficiency = {
+        "单人独立": 1.0,
+        "双人轮流": 0.92,
+        "三人交替": 0.88,
+        "多人协同": 0.85,
+        "自定义": 0.9
+    }
+    mode_factor = mode_efficiency.get(work_mode, 0.9)
+
+    if work_mode in ["双人轮流", "三人交替"]:
+        active_workers = 1
+    elif work_mode == "多人协同":
+        active_workers = min(worker_count, 3)
+    else:
+        active_workers = worker_count
+
+    base_flow = flow_per_worker * active_workers * mode_factor
+    return round(base_flow, 2)
+
+
+def calculate_fatigue_rate(
+    worker_count: int,
+    work_mode: str,
+    base_fatigue_factor: float,
+    workload_intensity: str,
+    env_factor: float
+) -> float:
+    intensity_factors = {
+        "轻松": 0.6,
+        "中等": 1.0,
+        "较重": 1.4,
+        "繁重": 1.8
+    }
+    intensity_factor = intensity_factors.get(workload_intensity, 1.0)
+
+    if work_mode in ["双人轮流", "三人交替"]:
+        rotation_factor = 0.6
+    elif work_mode == "多人协同":
+        rotation_factor = 0.75
+    else:
+        rotation_factor = 1.0
+
+    fatigue_rate = base_fatigue_factor * intensity_factor * rotation_factor * (2.0 - env_factor) / 60.0
+
+    return round(fatigue_rate, 6)
+
+
+def simulate_labor_scenario(
+    scene_config=None,
+    labor_scheme=None,
+    well_config=None,
+    simulation_duration_min: float = 120.0,
+    time_step_min: float = 1.0
+) -> dict:
+    env_factor = calculate_scene_environment_factor(scene_config) if scene_config else 1.0
+
+    worker_count = getattr(labor_scheme, 'worker_count', 1) if labor_scheme else 1
+    work_mode = getattr(labor_scheme, 'work_mode', '单人独立') if labor_scheme else '单人独立'
+    continuous_duration_min = getattr(labor_scheme, 'continuous_duration_min', 30.0) if labor_scheme else 30.0
+    rest_interval_min = getattr(labor_scheme, 'rest_interval_min', 0.0) if labor_scheme else 0.0
+    rest_duration_min = getattr(labor_scheme, 'rest_duration_min', 5.0) if labor_scheme else 5.0
+    shift_rotation = getattr(labor_scheme, 'shift_rotation', False) if labor_scheme else False
+    shift_duration_min = getattr(labor_scheme, 'shift_duration_min', 15.0) if labor_scheme else 15.0
+    base_fatigue_factor = getattr(labor_scheme, 'base_fatigue_factor', 0.1) if labor_scheme else 0.1
+    recovery_rate = getattr(labor_scheme, 'recovery_rate', 0.3) if labor_scheme else 0.3
+    workload_intensity = getattr(labor_scheme, 'workload_intensity', '中等') if labor_scheme else '中等'
+
+    base_flow = calculate_base_flow_rate(well_config, worker_count, work_mode)
+    fatigue_rate_per_min = calculate_fatigue_rate(
+        worker_count, work_mode, base_fatigue_factor, workload_intensity, env_factor
+    )
+
+    time_points = []
+    total_water = 0.0
+    current_fatigue = 0.0
+    peak_flow = 0.0
+    total_work_min = 0.0
+    total_rest_min = 0.0
+    flows = []
+    fatigue_values = []
+
+    num_steps = int(simulation_duration_min / time_step_min) + 1
+
+    cycle_total = continuous_duration_min + rest_duration_min if rest_interval_min > 0 else continuous_duration_min
+
+    for step in range(num_steps):
+        elapsed = step * time_step_min
+        is_rest = False
+
+        if rest_interval_min > 0 and continuous_duration_min > 0:
+            cycle_pos = elapsed % cycle_total
+            if cycle_pos >= continuous_duration_min:
+                is_rest = True
+
+        if shift_rotation and work_mode in ["双人轮流", "三人交替"] and not is_rest:
+            shift_cycle = shift_duration_min * (worker_count if worker_count > 1 else 1)
+            shift_pos = elapsed % shift_cycle
+            current_worker = int(shift_pos / shift_duration_min) % worker_count
+            active_workers = 1
+        else:
+            if work_mode in ["双人轮流", "三人交替"]:
+                active_workers = 0 if is_rest else 1
+            elif work_mode == "多人协同":
+                active_workers = 0 if is_rest else min(worker_count, 3)
+            else:
+                active_workers = 0 if is_rest else worker_count
+
+        if is_rest:
+            fatigue_decay = recovery_rate / 60.0 * time_step_min * 3.0
+            current_fatigue = max(0.0, current_fatigue - fatigue_decay)
+            instant_flow = 0.0
+            total_rest_min += time_step_min
+        else:
+            fatigue_gain = fatigue_rate_per_min * time_step_min * (1 + current_fatigue * 0.5)
+            current_fatigue = min(1.0, current_fatigue + fatigue_gain)
+            total_work_min += time_step_min
+
+            fatigue_efficiency = 1.0 - current_fatigue * 0.6
+            efficiency = env_factor * fatigue_efficiency
+
+            if work_mode == "多人协同" and worker_count >= 2:
+                synergy_bonus = 1.0 + (worker_count - 1) * 0.05
+                efficiency *= synergy_bonus
+
+            instant_flow = base_flow * efficiency
+            total_water += instant_flow * time_step_min
+            instant_flow = round(instant_flow, 4)
+
+            if instant_flow > peak_flow:
+                peak_flow = instant_flow
+
+            flows.append(instant_flow)
+
+        fatigue_values.append(current_fatigue)
+
+        time_points.append({
+            "point_index": step,
+            "elapsed_min": round(elapsed, 2),
+            "total_water_l": round(total_water, 2),
+            "instantaneous_flow_lpm": instant_flow,
+            "avg_fatigue_level": round(current_fatigue, 4),
+            "active_worker_count": active_workers,
+            "is_rest_period": is_rest,
+            "efficiency_factor": round(env_factor * (1.0 - current_fatigue * 0.6), 4)
+        })
+
+    avg_flow = round(total_water / total_work_min, 2) if total_work_min > 0 else 0.0
+    per_capita_flow = round(avg_flow / worker_count, 2) if worker_count > 0 else 0.0
+
+    valid_flows = [f for f in flows if f > 0]
+    if len(valid_flows) >= 3:
+        first_half = valid_flows[: len(valid_flows) // 2]
+        second_half = valid_flows[len(valid_flows) // 2:]
+        avg_first = sum(first_half) / len(first_half) if first_half else 0
+        avg_second = sum(second_half) / len(second_half) if second_half else 0
+        efficiency_decay_pct = round(((avg_first - avg_second) / avg_first * 100) if avg_first > 0 else 0, 2)
+
+        mean_flow = sum(valid_flows) / len(valid_flows)
+        variance = sum((f - mean_flow) ** 2 for f in valid_flows) / len(valid_flows)
+        std_flow = math.sqrt(variance) if variance > 0 else 0
+        stability_cv = round((std_flow / mean_flow * 100) if mean_flow > 0 else 0, 2)
+    else:
+        efficiency_decay_pct = 0.0
+        stability_cv = 0.0
+
+    final_fatigue = round(current_fatigue, 4)
+    avg_fatigue = round(sum(fatigue_values) / len(fatigue_values), 4) if fatigue_values else 0.0
+
+    work_rest_ratio = round(total_work_min / total_rest_min, 2) if total_rest_min > 0 else 99.9
+
+    overall_score = calculate_overall_score(
+        avg_flow, per_capita_flow, efficiency_decay_pct,
+        stability_cv, final_fatigue, work_rest_ratio
+    )
+
+    return {
+        "env_factor": env_factor,
+        "base_flow_lpm": base_flow,
+        "peak_flow_lpm": round(peak_flow, 2),
+        "avg_flow_lpm": avg_flow,
+        "per_capita_flow_lpm": per_capita_flow,
+        "total_water_l": round(total_water, 2),
+        "total_work_min": round(total_work_min, 2),
+        "total_rest_min": round(total_rest_min, 2),
+        "work_rest_ratio": work_rest_ratio,
+        "efficiency_decay_pct": efficiency_decay_pct,
+        "final_fatigue_level": final_fatigue,
+        "avg_fatigue_level": avg_fatigue,
+        "stability_cv": stability_cv,
+        "overall_score": overall_score,
+        "time_points": time_points
+    }
+
+
+def calculate_overall_score(
+    avg_flow: float,
+    per_capita_flow: float,
+    decay_pct: float,
+    stability_cv: float,
+    final_fatigue: float,
+    work_rest_ratio: float
+) -> float:
+    score_flow = min(1.0, avg_flow / 30.0) * 0.25
+    score_per_capita = min(1.0, per_capita_flow / 18.0) * 0.25
+    score_decay = max(0.0, 1.0 - decay_pct / 50.0) * 0.2
+    score_stability = max(0.0, 1.0 - stability_cv / 50.0) * 0.15
+    score_fatigue = max(0.0, 1.0 - final_fatigue) * 0.1
+    score_rest = 0.05 if work_rest_ratio < 20 else 0.0
+
+    total = score_flow + score_per_capita + score_decay + score_stability + score_fatigue + score_rest
+    return round(total * 100, 2)
+
+
+def generate_optimization_recommendation(scene_config, labor_scheme, simulation_result: dict) -> dict:
+    recommendations = []
+    best_worker_count = simulation_result.get("per_capita_flow_lpm", 0)
+    worker_count = getattr(labor_scheme, 'worker_count', 1) if labor_scheme else 1
+    work_mode = getattr(labor_scheme, 'work_mode', '单人独立') if labor_scheme else '单人独立'
+    rest_interval = getattr(labor_scheme, 'rest_interval_min', 0) if labor_scheme else 0
+    continuous_duration = getattr(labor_scheme, 'continuous_duration_min', 30) if labor_scheme else 30
+
+    decay_pct = simulation_result.get("efficiency_decay_pct", 0)
+    final_fatigue = simulation_result.get("final_fatigue_level", 0)
+    avg_flow = simulation_result.get("avg_flow_lpm", 0)
+    per_capita = simulation_result.get("per_capita_flow_lpm", 0)
+
+    if decay_pct > 25:
+        recommendations.append({
+            "aspect": "疲劳控制",
+            "level": "high",
+            "suggestion": f"效率衰减达{decay_pct:.1f}%，建议缩短单次连续作业时长或增加休息频率"
+        })
+
+    if final_fatigue > 0.7:
+        recommendations.append({
+            "aspect": "体力恢复",
+            "level": "high",
+            "suggestion": f"结束时疲劳度达{final_fatigue*100:.0f}%，建议采用轮班制或延长休息时间"
+        })
+
+    if rest_interval == 0 and decay_pct > 15:
+        rest_advice = max(5, int(continuous_duration * 0.15))
+        recommendations.append({
+            "aspect": "休息节奏",
+            "level": "medium",
+            "suggestion": f"建议每{int(continuous_duration * 0.6)}分钟安排{rest_advice}分钟休息，可显著减缓效率下降"
+        })
+
+    if worker_count == 1 and decay_pct > 20:
+        recommendations.append({
+            "aspect": "人员配置",
+            "level": "medium",
+            "suggestion": "单人作业衰减明显，建议采用双人轮流模式提升持续作业能力"
+        })
+
+    if work_mode == "多人协同" and worker_count > 3:
+        recommendations.append({
+            "aspect": "协同效率",
+            "level": "low",
+            "suggestion": f"{worker_count}人协同的边际效益递减，建议优化分工或减少人数至2-3人"
+        })
+
+    scene = getattr(scene_config, 'config_name', '未知场景') if scene_config else '默认场景'
+    scheme = getattr(labor_scheme, 'scheme_name', '未知方案') if labor_scheme else '默认方案'
+
+    conclusion_parts = []
+    conclusion_parts.append(f"在【{scene}】场景下，采用【{scheme}】：")
+    conclusion_parts.append(f"平均出水量 {avg_flow:.2f} L/min，人均 {per_capita:.2f} L/min/人")
+    conclusion_parts.append(f"效率衰减 {decay_pct:.1f}%，结束疲劳度 {final_fatigue*100:.0f}%")
+
+    overall = simulation_result.get("overall_score", 0)
+    if overall >= 80:
+        conclusion_parts.append("综合评估：优秀方案，各方面表现均衡")
+    elif overall >= 60:
+        conclusion_parts.append("综合评估：良好方案，部分参数可进一步优化")
+    elif overall >= 40:
+        conclusion_parts.append("综合评估：一般方案，建议参考优化建议调整")
+    else:
+        conclusion_parts.append("综合评估：待改进方案，需重点优化休息节奏和人员配置")
+
+    return {
+        "recommendations": recommendations,
+        "conclusion": "；".join(conclusion_parts),
+        "best_worker_count": worker_count,
+        "best_work_mode": work_mode,
+        "suggested_rest_rhythm": f"每{int(continuous_duration)}分钟休息{int(getattr(labor_scheme, 'rest_duration_min', 5) if labor_scheme else 5)}分钟" if rest_interval > 0 else "连续作业"
+    }
+
+
+def compare_simulations(simulation_results: List[dict]) -> dict:
+    if not simulation_results:
+        return {"error": "没有可对比的模拟结果"}
+
+    best_overall = max(simulation_results, key=lambda s: s.get("overall_score", 0))
+    best_per_capita = max(simulation_results, key=lambda s: s.get("per_capita_flow_lpm", 0))
+    best_sustained = max(simulation_results, key=lambda s: 100 - s.get("efficiency_decay_pct", 100))
+    best_total = max(simulation_results, key=lambda s: s.get("total_water_l", 0))
+
+    ranked = sorted(simulation_results, key=lambda s: s.get("overall_score", 0), reverse=True)
+    for i, sim in enumerate(ranked):
+        sim["ranking"] = i + 1
+
+    return {
+        "total_count": len(simulation_results),
+        "best_overall": best_overall.get("simulation_name", ""),
+        "best_overall_score": best_overall.get("overall_score", 0),
+        "best_per_capita": best_per_capita.get("simulation_name", ""),
+        "best_per_capita_value": best_per_capita.get("per_capita_flow_lpm", 0),
+        "best_sustained": best_sustained.get("simulation_name", ""),
+        "best_sustained_decay": best_sustained.get("efficiency_decay_pct", 0),
+        "best_total": best_total.get("simulation_name", ""),
+        "best_total_water": best_total.get("total_water_l", 0),
+        "ranked_simulations": ranked
+    }
+
+
+def generate_scene_report_content(well, scene_configs, labor_schemes, simulation_results, report_data) -> str:
+    lines = []
+    lines.append(f"# {well.name} - 劳作组织优化与历史场景复原报告")
+    lines.append("")
+    lines.append("## 一、研究背景")
+    lines.append("本报告针对古井汲水劳作的组织方式进行系统化模拟研究，通过设定不同的环境场景和劳作方案，")
+    lines.append("分析各类条件下的汲水效率、疲劳衰减和持续作业表现，为历史场景复原和现代应用提供科学依据。")
+    lines.append("")
+
+    lines.append("## 二、研究对象")
+    lines.append(f"- **古井名称**: {well.name}")
+    if well.location:
+        lines.append(f"- **地理位置**: {well.location}")
+    if well.dynasty:
+        lines.append(f"- **历史年代**: {well.dynasty}")
+    if well.description:
+        lines.append(f"- **简要描述**: {well.description}")
+    lines.append("")
+
+    lines.append("## 三、场景配置")
+    lines.append(f"本次研究共设置 {len(scene_configs)} 种典型场景：")
+    for i, scene in enumerate(scene_configs, 1):
+        lines.append(f"### 场景{i}：{scene.config_name}")
+        lines.append(f"- **季节**: {scene.season}")
+        lines.append(f"- **时段**: {scene.time_of_day}")
+        lines.append(f"- **气温**: {scene.temperature_c}°C")
+        lines.append(f"- **湿度**: {scene.humidity_pct}%")
+        lines.append(f"- **风力**: {scene.wind_level}级")
+        lines.append(f"- **地面**: {scene.ground_condition}")
+        if scene.water_level_m > 0:
+            lines.append(f"- **水位变化**: +{scene.water_level_m}m")
+        if scene.description:
+            lines.append(f"- **说明**: {scene.description}")
+        lines.append("")
+
+    lines.append("## 四、劳作方案")
+    lines.append(f"本次研究共对比 {len(labor_schemes)} 种劳作组织方式：")
+    for i, scheme in enumerate(labor_schemes, 1):
+        lines.append(f"### 方案{i}：{scheme.scheme_name}")
+        lines.append(f"- **参与人数**: {scheme.worker_count}人")
+        lines.append(f"- **分工方式**: {scheme.work_mode}")
+        lines.append(f"- **连续作业**: {scheme.continuous_duration_min}分钟")
+        if scheme.rest_interval_min > 0:
+            lines.append(f"- **休息安排**: 每{scheme.rest_interval_min}分钟休息{scheme.rest_duration_min}分钟")
+        else:
+            lines.append("- **休息安排**: 无休息（连续作业）")
+        if scheme.shift_rotation:
+            lines.append(f"- **轮班制度**: 是（每班{scheme.shift_duration_min}分钟）")
+        else:
+            lines.append("- **轮班制度**: 否")
+        lines.append(f"- **基础衰减系数**: {scheme.base_fatigue_factor}")
+        lines.append(f"- **劳动强度**: {scheme.workload_intensity}")
+        if scheme.description:
+            lines.append(f"- **说明**: {scheme.description}")
+        lines.append("")
+
+    lines.append("## 五、模拟结果汇总")
+    lines.append("")
+    lines.append("| 场景 | 方案 | 平均出水量(L/min) | 人均出水量(L/min/人) | 效率衰减(%) | 结束疲劳度 | 综合评分 |")
+    lines.append("|------|------|---------------------|-----------------------|-------------|------------|----------|")
+
+    for sim in simulation_results:
+        scene_name = sim.get("scene_name", "-")
+        scheme_name = sim.get("scheme_name", "-")
+        avg_flow = sim.get("avg_flow_lpm", 0)
+        per_capita = sim.get("per_capita_flow_lpm", 0)
+        decay = sim.get("efficiency_decay_pct", 0)
+        fatigue = sim.get("final_fatigue_level", 0)
+        score = sim.get("overall_score", 0)
+        lines.append(f"| {scene_name} | {scheme_name} | {avg_flow:.2f} | {per_capita:.2f} | {decay:.1f} | {fatigue*100:.0f}% | {score:.1f} |")
+    lines.append("")
+
+    lines.append("## 六、最优方案推荐")
+    if report_data.get("best_scheme_name"):
+        lines.append(f"### 🏆 综合最优方案：{report_data.get('best_scheme_name', '')}")
+        lines.append("")
+    if report_data.get("optimal_worker_count"):
+        lines.append(f"- **最优人数配置**: {report_data.get('optimal_worker_count')}人")
+    if report_data.get("optimal_work_mode"):
+        lines.append(f"- **最佳分工方式**: {report_data.get('optimal_work_mode')}")
+    if report_data.get("suggested_rest_rhythm"):
+        lines.append(f"- **推荐休息节奏**: {report_data.get('suggested_rest_rhythm')}")
+    lines.append("")
+
+    if report_data.get("recommendation"):
+        lines.append("### 💡 优化建议")
+        lines.append(report_data.get("recommendation", ""))
+        lines.append("")
+
+    lines.append("## 七、结论")
+    if report_data.get("conclusions"):
+        lines.append(report_data.get("conclusions", ""))
+    else:
+        lines.append("通过多场景、多方案的对比模拟分析，本研究系统揭示了古井汲水劳作的效率规律。")
+        lines.append("研究表明，合理的人员配置和休息安排可显著提升持续作业效率，不同环境场景下的最优方案存在差异。")
+        lines.append("建议根据实际季节、时段和地面条件灵活调整劳作组织方式，以达到最佳的人力利用效果。")
+    lines.append("")
+
+    lines.append("---")
+    lines.append(f"*报告生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*")
+    lines.append(f"*模拟场景数: {len(scene_configs)} | 劳作方案数: {len(labor_schemes)} | 模拟总次数: {len(simulation_results)}*")
+
+    return "\n".join(lines)

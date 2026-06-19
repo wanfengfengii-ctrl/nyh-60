@@ -386,3 +386,201 @@ class LaborComparisonResult(BaseModel):
     experiments: List[LaborExperimentResponse]
     synergy_analysis: Optional[dict] = None
     multi_round_comparison: Optional[dict] = None
+
+
+class SceneConfigBase(BaseModel):
+    config_name: str = Field(..., min_length=1, max_length=200)
+    season: Optional[str] = Field("春季", pattern="^(春季|夏季|秋季|冬季)$")
+    time_of_day: Optional[str] = Field("上午", pattern="^(清晨|上午|正午|下午|傍晚|夜间)$")
+    temperature_c: Optional[float] = Field(20.0, ge=-30, le=50, description="气温(-30~50°C)")
+    ground_condition: Optional[str] = Field("干燥坚实", pattern="^(干燥坚实|微湿防滑|泥泞湿滑|结冰光滑|沙石凹凸)$")
+    humidity_pct: Optional[float] = Field(50.0, ge=0, le=100, description="湿度(0~100%)")
+    wind_level: Optional[int] = Field(0, ge=0, le=12, description="风力等级(0~12)")
+    water_level_m: Optional[float] = Field(0.0, ge=0, description="水位变化(m)")
+    description: Optional[str] = Field("", max_length=2000)
+    is_preset: Optional[bool] = False
+
+
+class SceneConfigCreate(SceneConfigBase):
+    pass
+
+
+class SceneConfigUpdate(BaseModel):
+    config_name: Optional[str] = Field(None, min_length=1, max_length=200)
+    season: Optional[str] = Field(None, pattern="^(春季|夏季|秋季|冬季)$")
+    time_of_day: Optional[str] = Field(None, pattern="^(清晨|上午|正午|下午|傍晚|夜间)$")
+    temperature_c: Optional[float] = Field(None, ge=-30, le=50)
+    ground_condition: Optional[str] = Field(None, pattern="^(干燥坚实|微湿防滑|泥泞湿滑|结冰光滑|沙石凹凸)$")
+    humidity_pct: Optional[float] = Field(None, ge=0, le=100)
+    wind_level: Optional[int] = Field(None, ge=0, le=12)
+    water_level_m: Optional[float] = Field(None, ge=0)
+    description: Optional[str] = Field(None, max_length=2000)
+
+
+class SceneConfigResponse(SceneConfigBase):
+    id: int
+    well_id: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class LaborSchemeBase(BaseModel):
+    scheme_name: str = Field(..., min_length=1, max_length=200)
+    worker_count: int = Field(..., ge=1, description="参与人数≥1")
+    work_mode: str = Field(..., pattern="^(单人独立|双人轮流|三人交替|多人协同|自定义)$")
+    continuous_duration_min: float = Field(..., gt=0, description="连续作业时长>0分钟")
+    rest_interval_min: Optional[float] = Field(0.0, ge=0, description="休息间隔≥0分钟")
+    rest_duration_min: Optional[float] = Field(5.0, ge=0, description="单次休息时长≥0分钟")
+    shift_rotation: Optional[bool] = False
+    shift_duration_min: Optional[float] = Field(15.0, gt=0, description="轮班时长>0分钟")
+    base_fatigue_factor: Optional[float] = Field(0.1, ge=0, le=1, description="基础体力衰减系数0~1")
+    recovery_rate: Optional[float] = Field(0.3, ge=0, le=1, description="恢复速率0~1")
+    workload_intensity: Optional[str] = Field("中等", pattern="^(轻松|中等|较重|繁重)$")
+    description: Optional[str] = Field("", max_length=2000)
+
+
+class LaborSchemeCreate(LaborSchemeBase):
+    pass
+
+
+class LaborSchemeUpdate(BaseModel):
+    scheme_name: Optional[str] = Field(None, min_length=1, max_length=200)
+    worker_count: Optional[int] = Field(None, ge=1)
+    work_mode: Optional[str] = Field(None, pattern="^(单人独立|双人轮流|三人交替|多人协同|自定义)$")
+    continuous_duration_min: Optional[float] = Field(None, gt=0)
+    rest_interval_min: Optional[float] = Field(None, ge=0)
+    rest_duration_min: Optional[float] = Field(None, ge=0)
+    shift_rotation: Optional[bool] = None
+    shift_duration_min: Optional[float] = Field(None, gt=0)
+    base_fatigue_factor: Optional[float] = Field(None, ge=0, le=1)
+    recovery_rate: Optional[float] = Field(None, ge=0, le=1)
+    workload_intensity: Optional[str] = Field(None, pattern="^(轻松|中等|较重|繁重)$")
+    description: Optional[str] = Field(None, max_length=2000)
+
+
+class LaborSchemeResponse(LaborSchemeBase):
+    id: int
+    well_id: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class SimulationTimePointBase(BaseModel):
+    point_index: int = Field(..., ge=0)
+    elapsed_min: float = Field(..., ge=0)
+    total_water_l: float = Field(0.0, ge=0)
+    instantaneous_flow_lpm: float = Field(0.0, ge=0)
+    avg_fatigue_level: float = Field(0.0, ge=0, le=1)
+    active_worker_count: int = Field(0, ge=0)
+    is_rest_period: bool = False
+    efficiency_factor: float = Field(1.0, ge=0, le=2)
+
+
+class SimulationTimePointResponse(SimulationTimePointBase):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+
+class SceneSimulationBase(BaseModel):
+    simulation_name: str = Field(..., min_length=1, max_length=200)
+    simulation_duration_min: float = Field(120.0, gt=0, description="模拟时长>0分钟")
+    time_step_min: float = Field(1.0, gt=0, description="时间步长>0分钟")
+
+
+class SceneSimulationCreate(SceneSimulationBase):
+    scene_config_id: Optional[int] = None
+    labor_scheme_id: Optional[int] = None
+    config_id: Optional[int] = None
+
+
+class SceneSimulationResponse(SceneSimulationBase):
+    id: int
+    well_id: int
+    total_water_l: float
+    avg_flow_rate_lpm: float
+    peak_flow_rate_lpm: float
+    per_capita_flow_lpm: float
+    efficiency_decay_pct: float
+    final_fatigue_level: float
+    avg_fatigue_level: float
+    total_rest_min: float
+    total_work_min: float
+    work_rest_ratio: float
+    stability_cv: float
+    overall_score: float
+    created_at: datetime
+    time_points: List[SimulationTimePointResponse] = []
+
+    class Config:
+        from_attributes = True
+
+
+class SceneSimulationRunRequest(BaseModel):
+    well_id: int = Field(..., gt=0)
+    scene_config_id: Optional[int] = None
+    labor_scheme_id: Optional[int] = None
+    config_id: Optional[int] = None
+    simulation_name: str = Field(..., min_length=1, max_length=200)
+    simulation_duration_min: float = Field(120.0, gt=0)
+    time_step_min: float = Field(1.0, gt=0)
+
+
+class OptimizationReportItemResponse(BaseModel):
+    id: int
+    report_id: int
+    simulation_id: Optional[int] = None
+    scene_config_id: Optional[int] = None
+    labor_scheme_id: Optional[int] = None
+    scene_name: str = ""
+    scheme_name: str = ""
+    avg_flow_rate_lpm: float = 0.0
+    per_capita_flow_lpm: float = 0.0
+    efficiency_decay_pct: float = 0.0
+    overall_score: float = 0.0
+    ranking: int = 0
+    notes: str = ""
+
+    class Config:
+        from_attributes = True
+
+
+class OptimizationReportBase(BaseModel):
+    report_title: str = Field(..., min_length=1, max_length=200)
+    author: Optional[str] = Field("", max_length=100)
+    summary: Optional[str] = ""
+    conclusions: Optional[str] = ""
+
+
+class OptimizationReportCreate(OptimizationReportBase):
+    scene_config_ids: Optional[List[int]] = None
+    labor_scheme_ids: Optional[List[int]] = None
+    config_id: Optional[int] = None
+    simulation_duration_min: Optional[float] = Field(120.0, gt=0)
+
+
+class OptimizationReportResponse(OptimizationReportBase):
+    id: int
+    well_id: int
+    config_id: Optional[int] = None
+    report_content: str = ""
+    best_scheme_id: Optional[int] = None
+    best_scheme_name: str = ""
+    scene_count: int = 0
+    scheme_count: int = 0
+    recommendation: str = ""
+    optimal_worker_count: Optional[int] = None
+    optimal_work_mode: str = ""
+    suggested_rest_rhythm: str = ""
+    created_at: datetime
+    items: List[OptimizationReportItemResponse] = []
+
+    class Config:
+        from_attributes = True

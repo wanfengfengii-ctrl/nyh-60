@@ -19,7 +19,10 @@ from schemas import (
     WellComparisonData, EfficiencyPredictionInput,
     ExperimentReviewCreate, ExperimentReportCreate,
     LaborExperimentCreate, LaborExperimentUpdate,
-    LaborTimePointCreate, LaborComparisonGroupCreate
+    LaborTimePointCreate, LaborComparisonGroupCreate,
+    SceneConfigCreate, SceneConfigUpdate,
+    LaborSchemeCreate, LaborSchemeUpdate,
+    OptimizationReportCreate
 )
 from crud import (
     get_wells, get_well, create_well, update_well, delete_well,
@@ -37,7 +40,11 @@ from crud import (
     recalculate_labor_experiment,
     get_labor_comparison_groups, get_labor_comparison_group,
     create_labor_comparison_group, delete_labor_comparison_group,
-    analyze_labor_comparison_group
+    analyze_labor_comparison_group,
+    get_scene_configs, get_scene_config, create_scene_config, update_scene_config, delete_scene_config,
+    get_labor_schemes, get_labor_scheme, create_labor_scheme, update_labor_scheme, delete_labor_scheme,
+    run_scene_simulation, get_simulations, get_simulation, delete_simulation,
+    create_optimization_report, get_optimization_reports, get_optimization_report, delete_optimization_report
 )
 from calculator import calculate_experiment_efficiency
 
@@ -1160,6 +1167,424 @@ async def get_well_labor_comparisons_api(well_id: int, db: Session = Depends(get
             "created_at": g.created_at.strftime("%Y-%m-%d %H:%M:%S") if g.created_at else None
         })
     return JSONResponse({"comparisons": result, "groups": result})
+
+
+@app.get("/scene-optimization", response_class=HTMLResponse)
+async def scene_optimization_page(request: Request, db: Session = Depends(get_db)):
+    wells = get_wells(db)
+    pending_count = len(get_all_pending_reviews(db))
+    scene_configs = get_scene_configs(db)
+    labor_schemes = get_labor_schemes(db)
+    optimization_reports = get_optimization_reports(db)
+    return templates.TemplateResponse("scene_optimization.html", {
+        "request": request,
+        "wells": wells,
+        "pending_count": pending_count,
+        "scene_configs": scene_configs,
+        "labor_schemes": labor_schemes,
+        "optimization_reports": optimization_reports
+    })
+
+
+@app.get("/api/wells/{well_id}/scene-configs")
+async def get_scene_configs_api(well_id: int, db: Session = Depends(get_db)):
+    well = get_well(db, well_id)
+    if not well:
+        raise HTTPException(status_code=404, detail="古井档案不存在")
+    configs = get_scene_configs(db, well_id=well_id)
+    return JSONResponse({
+        "configs": [
+            {
+                "id": c.id,
+                "config_name": c.config_name,
+                "season": c.season,
+                "time_of_day": c.time_of_day,
+                "temperature_c": c.temperature_c,
+                "ground_condition": c.ground_condition,
+                "humidity_pct": c.humidity_pct,
+                "wind_level": c.wind_level,
+                "water_level_m": c.water_level_m,
+                "description": c.description or "",
+                "is_preset": c.is_preset,
+                "created_at": c.created_at.strftime("%Y-%m-%d %H:%M:%S") if c.created_at else None
+            } for c in configs
+        ]
+    })
+
+
+@app.post("/api/wells/{well_id}/scene-configs")
+async def create_scene_config_api(
+    well_id: int,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    well = get_well(db, well_id)
+    if not well:
+        return JSONResponse({"success": False, "error": "古井档案不存在"}, status_code=404)
+    try:
+        body = await request.json()
+        data = SceneConfigCreate(**body)
+    except ValidationError as e:
+        errors = "; ".join([err["msg"] for err in e.errors()])
+        return JSONResponse({"success": False, "error": f"数据错误: {errors}"}, status_code=400)
+    except Exception:
+        return JSONResponse({"success": False, "error": "请求数据格式错误"}, status_code=400)
+
+    try:
+        config = create_scene_config(db, well_id, data)
+        return JSONResponse({"success": True, "config_id": config.id})
+    except ValueError as e:
+        return JSONResponse({"success": False, "error": str(e)}, status_code=400)
+
+
+@app.put("/api/scene-configs/{config_id}")
+async def update_scene_config_api(
+    config_id: int,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    config = get_scene_config(db, config_id)
+    if not config:
+        raise HTTPException(status_code=404, detail="场景配置不存在")
+    try:
+        body = await request.json()
+        data = SceneConfigUpdate(**body)
+    except ValidationError as e:
+        errors = "; ".join([err["msg"] for err in e.errors()])
+        return JSONResponse({"success": False, "error": f"数据错误: {errors}"}, status_code=400)
+    except Exception:
+        return JSONResponse({"success": False, "error": "请求数据格式错误"}, status_code=400)
+
+    config = update_scene_config(db, config, data)
+    return JSONResponse({"success": True, "config_id": config.id})
+
+
+@app.post("/api/scene-configs/{config_id}/delete")
+async def delete_scene_config_api(config_id: int, db: Session = Depends(get_db)):
+    if not delete_scene_config(db, config_id):
+        raise HTTPException(status_code=404, detail="场景配置不存在")
+    return JSONResponse({"success": True})
+
+
+@app.get("/api/wells/{well_id}/labor-schemes")
+async def get_labor_schemes_api(well_id: int, db: Session = Depends(get_db)):
+    well = get_well(db, well_id)
+    if not well:
+        raise HTTPException(status_code=404, detail="古井档案不存在")
+    schemes = get_labor_schemes(db, well_id=well_id)
+    return JSONResponse({
+        "schemes": [
+            {
+                "id": s.id,
+                "scheme_name": s.scheme_name,
+                "worker_count": s.worker_count,
+                "work_mode": s.work_mode,
+                "continuous_duration_min": s.continuous_duration_min,
+                "rest_interval_min": s.rest_interval_min,
+                "rest_duration_min": s.rest_duration_min,
+                "shift_rotation": s.shift_rotation,
+                "shift_duration_min": s.shift_duration_min,
+                "base_fatigue_factor": s.base_fatigue_factor,
+                "recovery_rate": s.recovery_rate,
+                "workload_intensity": s.workload_intensity,
+                "description": s.description or "",
+                "created_at": s.created_at.strftime("%Y-%m-%d %H:%M:%S") if s.created_at else None
+            } for s in schemes
+        ]
+    })
+
+
+@app.post("/api/wells/{well_id}/labor-schemes")
+async def create_labor_scheme_api(
+    well_id: int,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    well = get_well(db, well_id)
+    if not well:
+        return JSONResponse({"success": False, "error": "古井档案不存在"}, status_code=404)
+    try:
+        body = await request.json()
+        data = LaborSchemeCreate(**body)
+    except ValidationError as e:
+        errors = "; ".join([err["msg"] for err in e.errors()])
+        return JSONResponse({"success": False, "error": f"数据错误: {errors}"}, status_code=400)
+    except Exception:
+        return JSONResponse({"success": False, "error": "请求数据格式错误"}, status_code=400)
+
+    try:
+        scheme = create_labor_scheme(db, well_id, data)
+        return JSONResponse({"success": True, "scheme_id": scheme.id})
+    except ValueError as e:
+        return JSONResponse({"success": False, "error": str(e)}, status_code=400)
+
+
+@app.put("/api/labor-schemes/{scheme_id}")
+async def update_labor_scheme_api(
+    scheme_id: int,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    scheme = get_labor_scheme(db, scheme_id)
+    if not scheme:
+        raise HTTPException(status_code=404, detail="劳作方案不存在")
+    try:
+        body = await request.json()
+        data = LaborSchemeUpdate(**body)
+    except ValidationError as e:
+        errors = "; ".join([err["msg"] for err in e.errors()])
+        return JSONResponse({"success": False, "error": f"数据错误: {errors}"}, status_code=400)
+    except Exception:
+        return JSONResponse({"success": False, "error": "请求数据格式错误"}, status_code=400)
+
+    scheme = update_labor_scheme(db, scheme, data)
+    return JSONResponse({"success": True, "scheme_id": scheme.id})
+
+
+@app.post("/api/labor-schemes/{scheme_id}/delete")
+async def delete_labor_scheme_api(scheme_id: int, db: Session = Depends(get_db)):
+    if not delete_labor_scheme(db, scheme_id):
+        raise HTTPException(status_code=404, detail="劳作方案不存在")
+    return JSONResponse({"success": True})
+
+
+@app.post("/api/wells/{well_id}/simulate")
+async def run_simulation_api(
+    well_id: int,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    well = get_well(db, well_id)
+    if not well:
+        return JSONResponse({"success": False, "error": "古井档案不存在"}, status_code=404)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"success": False, "error": "请求数据格式错误"}, status_code=400)
+
+    simulation_name = body.get("simulation_name", "模拟实验")
+    scene_config_id = body.get("scene_config_id")
+    labor_scheme_id = body.get("labor_scheme_id")
+    config_id = body.get("config_id")
+    simulation_duration_min = float(body.get("simulation_duration_min", 120))
+    time_step_min = float(body.get("time_step_min", 1.0))
+
+    if simulation_duration_min <= 0:
+        return JSONResponse({"success": False, "error": "模拟时长必须大于0"}, status_code=400)
+    if time_step_min <= 0:
+        return JSONResponse({"success": False, "error": "时间步长必须大于0"}, status_code=400)
+
+    try:
+        sim = run_scene_simulation(
+            db, well_id, simulation_name,
+            scene_config_id=scene_config_id,
+            labor_scheme_id=labor_scheme_id,
+            config_id=config_id,
+            simulation_duration_min=simulation_duration_min,
+            time_step_min=time_step_min
+        )
+        return JSONResponse({"success": True, "simulation_id": sim.id})
+    except ValueError as e:
+        return JSONResponse({"success": False, "error": str(e)}, status_code=400)
+
+
+@app.get("/api/simulations/{sim_id}")
+async def get_simulation_api(sim_id: int, db: Session = Depends(get_db)):
+    sim = get_simulation(db, sim_id)
+    if not sim:
+        raise HTTPException(status_code=404, detail="模拟记录不存在")
+
+    time_points = []
+    for tp in sim.time_points:
+        time_points.append({
+            "id": tp.id,
+            "point_index": tp.point_index,
+            "elapsed_min": tp.elapsed_min,
+            "total_water_l": tp.total_water_l,
+            "instantaneous_flow_lpm": tp.instantaneous_flow_lpm,
+            "avg_fatigue_level": tp.avg_fatigue_level,
+            "active_worker_count": tp.active_worker_count,
+            "is_rest_period": tp.is_rest_period,
+            "efficiency_factor": tp.efficiency_factor
+        })
+
+    scene_config = sim.scene_config
+    labor_scheme = sim.labor_scheme
+
+    return JSONResponse({
+        "success": True,
+        "id": sim.id,
+        "well_id": sim.well_id,
+        "simulation_name": sim.simulation_name,
+        "scene_config": {
+            "id": scene_config.id if scene_config else None,
+            "config_name": scene_config.config_name if scene_config else "默认场景",
+            "season": scene_config.season if scene_config else "",
+            "time_of_day": scene_config.time_of_day if scene_config else "",
+            "temperature_c": scene_config.temperature_c if scene_config else None,
+            "ground_condition": scene_config.ground_condition if scene_config else ""
+        } if scene_config else None,
+        "labor_scheme": {
+            "id": labor_scheme.id if labor_scheme else None,
+            "scheme_name": labor_scheme.scheme_name if labor_scheme else "默认方案",
+            "worker_count": labor_scheme.worker_count if labor_scheme else 1,
+            "work_mode": labor_scheme.work_mode if labor_scheme else "单人独立"
+        } if labor_scheme else None,
+        "simulation_duration_min": sim.simulation_duration_min,
+        "time_step_min": sim.time_step_min,
+        "total_water_l": sim.total_water_l,
+        "avg_flow_rate_lpm": sim.avg_flow_rate_lpm,
+        "peak_flow_rate_lpm": sim.peak_flow_rate_lpm,
+        "per_capita_flow_lpm": sim.per_capita_flow_lpm,
+        "efficiency_decay_pct": sim.efficiency_decay_pct,
+        "final_fatigue_level": sim.final_fatigue_level,
+        "avg_fatigue_level": sim.avg_fatigue_level,
+        "total_rest_min": sim.total_rest_min,
+        "total_work_min": sim.total_work_min,
+        "work_rest_ratio": sim.work_rest_ratio,
+        "stability_cv": sim.stability_cv,
+        "overall_score": sim.overall_score,
+        "time_points": time_points,
+        "created_at": sim.created_at.strftime("%Y-%m-%d %H:%M:%S") if sim.created_at else None
+    })
+
+
+@app.get("/api/wells/{well_id}/simulations")
+async def get_well_simulations_api(well_id: int, db: Session = Depends(get_db)):
+    well = get_well(db, well_id)
+    if not well:
+        raise HTTPException(status_code=404, detail="古井档案不存在")
+    simulations = get_simulations(db, well_id=well_id)
+    result = []
+    for sim in simulations:
+        result.append({
+            "id": sim.id,
+            "simulation_name": sim.simulation_name,
+            "total_water_l": sim.total_water_l,
+            "avg_flow_rate_lpm": sim.avg_flow_rate_lpm,
+            "per_capita_flow_lpm": sim.per_capita_flow_lpm,
+            "efficiency_decay_pct": sim.efficiency_decay_pct,
+            "final_fatigue_level": sim.final_fatigue_level,
+            "overall_score": sim.overall_score,
+            "created_at": sim.created_at.strftime("%Y-%m-%d %H:%M:%S") if sim.created_at else None
+        })
+    return JSONResponse({"simulations": result})
+
+
+@app.post("/api/simulations/{sim_id}/delete")
+async def delete_simulation_api(sim_id: int, db: Session = Depends(get_db)):
+    if not delete_simulation(db, sim_id):
+        raise HTTPException(status_code=404, detail="模拟记录不存在")
+    return JSONResponse({"success": True})
+
+
+@app.post("/api/wells/{well_id}/optimization-reports")
+async def create_optimization_report_api(
+    well_id: int,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    well = get_well(db, well_id)
+    if not well:
+        return JSONResponse({"success": False, "error": "古井档案不存在"}, status_code=404)
+
+    try:
+        body = await request.json()
+        data = OptimizationReportCreate(**body)
+    except ValidationError as e:
+        errors = "; ".join([err["msg"] for err in e.errors()])
+        return JSONResponse({"success": False, "error": f"数据错误: {errors}"}, status_code=400)
+    except Exception:
+        return JSONResponse({"success": False, "error": "请求数据格式错误"}, status_code=400)
+
+    try:
+        report = create_optimization_report(db, well_id, data)
+        return JSONResponse({"success": True, "report_id": report.id, "redirect": f"/scene-optimization"})
+    except ValueError as e:
+        return JSONResponse({"success": False, "error": str(e)}, status_code=400)
+
+
+@app.get("/api/optimization-reports/{report_id}")
+async def get_optimization_report_api(report_id: int, db: Session = Depends(get_db)):
+    report = get_optimization_report(db, report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="优化报告不存在")
+
+    items = []
+    for item in report.items:
+        items.append({
+            "id": item.id,
+            "simulation_id": item.simulation_id,
+            "scene_name": item.scene_name,
+            "scheme_name": item.scheme_name,
+            "avg_flow_rate_lpm": item.avg_flow_rate_lpm,
+            "per_capita_flow_lpm": item.per_capita_flow_lpm,
+            "efficiency_decay_pct": item.efficiency_decay_pct,
+            "overall_score": item.overall_score,
+            "ranking": item.ranking
+        })
+
+    return JSONResponse({
+        "success": True,
+        "id": report.id,
+        "well_id": report.well_id,
+        "report_title": report.report_title,
+        "author": report.author,
+        "summary": report.summary,
+        "conclusions": report.conclusions,
+        "report_content": report.report_content,
+        "best_scheme_id": report.best_scheme_id,
+        "best_scheme_name": report.best_scheme_name,
+        "scene_count": report.scene_count,
+        "scheme_count": report.scheme_count,
+        "recommendation": report.recommendation,
+        "optimal_worker_count": report.optimal_worker_count,
+        "optimal_work_mode": report.optimal_work_mode,
+        "suggested_rest_rhythm": report.suggested_rest_rhythm,
+        "items": sorted(items, key=lambda x: x["ranking"]),
+        "created_at": report.created_at.strftime("%Y-%m-%d %H:%M:%S") if report.created_at else None
+    })
+
+
+@app.get("/api/wells/{well_id}/optimization-reports")
+async def get_well_optimization_reports_api(well_id: int, db: Session = Depends(get_db)):
+    well = get_well(db, well_id)
+    if not well:
+        raise HTTPException(status_code=404, detail="古井档案不存在")
+    reports = get_optimization_reports(db, well_id=well_id)
+    result = []
+    for r in reports:
+        result.append({
+            "id": r.id,
+            "report_title": r.report_title,
+            "best_scheme_name": r.best_scheme_name,
+            "scene_count": r.scene_count,
+            "scheme_count": r.scheme_count,
+            "optimal_worker_count": r.optimal_worker_count,
+            "created_at": r.created_at.strftime("%Y-%m-%d %H:%M:%S") if r.created_at else None
+        })
+    return JSONResponse({"reports": result})
+
+
+@app.post("/api/optimization-reports/{report_id}/delete")
+async def delete_optimization_report_api(report_id: int, db: Session = Depends(get_db)):
+    if not delete_optimization_report(db, report_id):
+        raise HTTPException(status_code=404, detail="优化报告不存在")
+    return JSONResponse({"success": True})
+
+
+@app.get("/scene-optimization/reports/{report_id}", response_class=HTMLResponse)
+async def optimization_report_detail_page(request: Request, report_id: int, db: Session = Depends(get_db)):
+    report = get_optimization_report(db, report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="优化报告不存在")
+    well = get_well(db, report.well_id)
+    return templates.TemplateResponse("optimization_report_detail.html", {
+        "request": request,
+        "report": report,
+        "well": well
+    })
 
 
 if __name__ == "__main__":

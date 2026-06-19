@@ -28,7 +28,9 @@ def init_db():
         Well, WellConfig, Experiment, TimePoint,
         ConfigChangeLog, ExperimentReview, ImportExportLog, ExperimentReport,
         LaborExperiment, LaborTimePoint, LaborAnalysisResult,
-        LaborComparisonGroup, LaborComparisonItem
+        LaborComparisonGroup, LaborComparisonItem,
+        SceneConfig, LaborScheme, SceneSimulation, SimulationTimePoint,
+        OptimizationReport, OptimizationReportItem
     )
     Base.metadata.create_all(bind=engine)
 

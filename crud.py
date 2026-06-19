@@ -6,7 +6,9 @@ from models import (
     Well, WellConfig, Experiment, TimePoint,
     ConfigChangeLog, ExperimentReview, ImportExportLog, ExperimentReport,
     LaborExperiment, LaborTimePoint, LaborAnalysisResult,
-    LaborComparisonGroup, LaborComparisonItem
+    LaborComparisonGroup, LaborComparisonItem,
+    SceneConfig, LaborScheme, SceneSimulation, SimulationTimePoint,
+    OptimizationReport, OptimizationReportItem
 )
 from schemas import (
     WellCreate, WellUpdate,
@@ -15,7 +17,10 @@ from schemas import (
     ExperimentReviewCreate, TimePointUpdate,
     ExperimentReportCreate,
     LaborExperimentCreate, LaborExperimentUpdate,
-    LaborComparisonGroupCreate
+    LaborComparisonGroupCreate,
+    SceneConfigCreate, SceneConfigUpdate,
+    LaborSchemeCreate, LaborSchemeUpdate,
+    OptimizationReportCreate
 )
 from calculator import (
     calculate_experiment_efficiency,
@@ -911,3 +916,459 @@ def analyze_labor_comparison_group(db: Session, group: LaborComparisonGroup) -> 
         "multi_round_comparison": multi_round,
         "recommendation": recommendation,
     }
+
+
+def get_scene_configs(db: Session, well_id: Optional[int] = None, skip: int = 0, limit: int = 100) -> List[SceneConfig]:
+    from models import SceneConfig
+    query = db.query(SceneConfig)
+    if well_id:
+        query = query.filter(SceneConfig.well_id == well_id)
+    return query.order_by(desc(SceneConfig.created_at)).offset(skip).limit(limit).all()
+
+
+def get_scene_config(db: Session, config_id: int) -> Optional[SceneConfig]:
+    from models import SceneConfig
+    return db.query(SceneConfig).filter(SceneConfig.id == config_id).first()
+
+
+def create_scene_config(db: Session, well_id: int, data: SceneConfigCreate) -> SceneConfig:
+    from models import SceneConfig
+    well = get_well(db, well_id)
+    if not well:
+        raise ValueError("指定的古井不存在")
+
+    config = SceneConfig(
+        well_id=well_id,
+        **data.model_dump()
+    )
+    db.add(config)
+    db.commit()
+    db.refresh(config)
+    return config
+
+
+def update_scene_config(db: Session, config: SceneConfig, data: SceneConfigUpdate) -> SceneConfig:
+    update_data = data.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(config, field, value)
+    db.commit()
+    db.refresh(config)
+    return config
+
+
+def delete_scene_config(db: Session, config_id: int) -> bool:
+    from models import SceneConfig
+    config = get_scene_config(db, config_id)
+    if config:
+        db.delete(config)
+        db.commit()
+        return True
+    return False
+
+
+def get_preset_scene_configs(db: Session, well_id: Optional[int] = None) -> List[SceneConfig]:
+    from models import SceneConfig
+    query = db.query(SceneConfig).filter(SceneConfig.is_preset == True)
+    if well_id:
+        query = query.filter(SceneConfig.well_id == well_id)
+    return query.order_by(SceneConfig.config_name).all()
+
+
+def get_labor_schemes(db: Session, well_id: Optional[int] = None, skip: int = 0, limit: int = 100) -> List[LaborScheme]:
+    from models import LaborScheme
+    query = db.query(LaborScheme)
+    if well_id:
+        query = query.filter(LaborScheme.well_id == well_id)
+    return query.order_by(desc(LaborScheme.created_at)).offset(skip).limit(limit).all()
+
+
+def get_labor_scheme(db: Session, scheme_id: int) -> Optional[LaborScheme]:
+    from models import LaborScheme
+    return db.query(LaborScheme).filter(LaborScheme.id == scheme_id).first()
+
+
+def create_labor_scheme(db: Session, well_id: int, data: LaborSchemeCreate) -> LaborScheme:
+    from models import LaborScheme
+    well = get_well(db, well_id)
+    if not well:
+        raise ValueError("指定的古井不存在")
+
+    scheme = LaborScheme(
+        well_id=well_id,
+        **data.model_dump()
+    )
+    db.add(scheme)
+    db.commit()
+    db.refresh(scheme)
+    return scheme
+
+
+def update_labor_scheme(db: Session, scheme: LaborScheme, data: LaborSchemeUpdate) -> LaborScheme:
+    update_data = data.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(scheme, field, value)
+    db.commit()
+    db.refresh(scheme)
+    return scheme
+
+
+def delete_labor_scheme(db: Session, scheme_id: int) -> bool:
+    from models import LaborScheme
+    scheme = get_labor_scheme(db, scheme_id)
+    if scheme:
+        db.delete(scheme)
+        db.commit()
+        return True
+    return False
+
+
+def run_scene_simulation(
+    db: Session,
+    well_id: int,
+    simulation_name: str,
+    scene_config_id: Optional[int] = None,
+    labor_scheme_id: Optional[int] = None,
+    config_id: Optional[int] = None,
+    simulation_duration_min: float = 120.0,
+    time_step_min: float = 1.0
+) -> SceneSimulation:
+    from models import SceneSimulation, SimulationTimePoint
+    from calculator import simulate_labor_scenario
+
+    well = get_well(db, well_id)
+    if not well:
+        raise ValueError("指定的古井不存在")
+
+    scene_config = None
+    if scene_config_id:
+        scene_config = get_scene_config(db, scene_config_id)
+        if not scene_config or scene_config.well_id != well_id:
+            raise ValueError("指定的场景配置不存在或不属于该古井")
+
+    labor_scheme = None
+    if labor_scheme_id:
+        labor_scheme = get_labor_scheme(db, labor_scheme_id)
+        if not labor_scheme or labor_scheme.well_id != well_id:
+            raise ValueError("指定的劳作方案不存在或不属于该古井")
+
+    well_config = None
+    if config_id:
+        well_config = get_config(db, config_id)
+        if not well_config or well_config.well_id != well_id:
+            raise ValueError("指定的结构参数配置不存在或不属于该古井")
+
+    sim_result = simulate_labor_scenario(
+        scene_config=scene_config,
+        labor_scheme=labor_scheme,
+        well_config=well_config,
+        simulation_duration_min=simulation_duration_min,
+        time_step_min=time_step_min
+    )
+
+    simulation = SceneSimulation(
+        well_id=well_id,
+        scene_config_id=scene_config_id,
+        labor_scheme_id=labor_scheme_id,
+        config_id=config_id,
+        simulation_name=simulation_name,
+        simulation_duration_min=simulation_duration_min,
+        time_step_min=time_step_min,
+        total_water_l=sim_result["total_water_l"],
+        avg_flow_rate_lpm=sim_result["avg_flow_lpm"],
+        peak_flow_rate_lpm=sim_result["peak_flow_lpm"],
+        per_capita_flow_lpm=sim_result["per_capita_flow_lpm"],
+        efficiency_decay_pct=sim_result["efficiency_decay_pct"],
+        final_fatigue_level=sim_result["final_fatigue_level"],
+        avg_fatigue_level=sim_result["avg_fatigue_level"],
+        total_rest_min=sim_result["total_rest_min"],
+        total_work_min=sim_result["total_work_min"],
+        work_rest_ratio=sim_result["work_rest_ratio"],
+        stability_cv=sim_result["stability_cv"],
+        overall_score=sim_result["overall_score"]
+    )
+    db.add(simulation)
+    db.flush()
+
+    for tp_data in sim_result["time_points"]:
+        tp = SimulationTimePoint(
+            simulation_id=simulation.id,
+            point_index=tp_data["point_index"],
+            elapsed_min=tp_data["elapsed_min"],
+            total_water_l=tp_data["total_water_l"],
+            instantaneous_flow_lpm=tp_data["instantaneous_flow_lpm"],
+            avg_fatigue_level=tp_data["avg_fatigue_level"],
+            active_worker_count=tp_data["active_worker_count"],
+            is_rest_period=tp_data["is_rest_period"],
+            efficiency_factor=tp_data["efficiency_factor"]
+        )
+        db.add(tp)
+
+    db.commit()
+    db.refresh(simulation)
+    return simulation
+
+
+def get_simulations(db: Session, well_id: Optional[int] = None, skip: int = 0, limit: int = 100) -> List[SceneSimulation]:
+    from models import SceneSimulation
+    query = db.query(SceneSimulation)
+    if well_id:
+        query = query.filter(SceneSimulation.well_id == well_id)
+    return query.order_by(desc(SceneSimulation.created_at)).offset(skip).limit(limit).all()
+
+
+def get_simulation(db: Session, sim_id: int) -> Optional[SceneSimulation]:
+    from models import SceneSimulation
+    return db.query(SceneSimulation).filter(SceneSimulation.id == sim_id).first()
+
+
+def delete_simulation(db: Session, sim_id: int) -> bool:
+    from models import SceneSimulation
+    sim = get_simulation(db, sim_id)
+    if sim:
+        db.delete(sim)
+        db.commit()
+        return True
+    return False
+
+
+def create_optimization_report(
+    db: Session,
+    well_id: int,
+    data: OptimizationReportCreate
+) -> OptimizationReport:
+    from models import OptimizationReport, OptimizationReportItem
+    from calculator import (
+        simulate_labor_scenario, generate_scene_report_content,
+        compare_simulations, generate_optimization_recommendation
+    )
+
+    well = get_well(db, well_id)
+    if not well:
+        raise ValueError("指定的古井不存在")
+
+    scene_config_ids = data.scene_config_ids or []
+    labor_scheme_ids = data.labor_scheme_ids or []
+
+    if not scene_config_ids:
+        scene_configs = get_scene_configs(db, well_id=well_id, limit=3)
+        scene_config_ids = [sc.id for sc in scene_configs[:2]] if scene_configs else []
+
+    if not labor_scheme_ids:
+        schemes = get_labor_schemes(db, well_id=well_id, limit=5)
+        labor_scheme_ids = [s.id for s in schemes[:3]] if schemes else []
+
+    if not scene_config_ids:
+        scene_configs = []
+    else:
+        scene_configs = [get_scene_config(db, sid) for sid in scene_config_ids]
+        scene_configs = [sc for sc in scene_configs if sc and sc.well_id == well_id]
+
+    if not labor_scheme_ids:
+        labor_schemes = []
+    else:
+        labor_schemes = [get_labor_scheme(db, sid) for sid in labor_scheme_ids]
+        labor_schemes = [s for s in labor_schemes if s and s.well_id == well_id]
+
+    if not scene_configs and not labor_schemes:
+        raise ValueError("至少需要一个场景配置或一个劳作方案")
+
+    well_config = None
+    if data.config_id:
+        well_config = get_config(db, data.config_id)
+        if not well_config or well_config.well_id != well_id:
+            raise ValueError("指定的结构参数配置不存在或不属于该古井")
+
+    if not scene_configs:
+        scene_configs = [None]
+    if not labor_schemes:
+        labor_schemes = [None]
+
+    simulation_results = []
+    simulation_items = []
+
+    for scene in scene_configs:
+        for scheme in labor_schemes:
+            scene_name = scene.config_name if scene else "默认场景"
+            scheme_name = scheme.scheme_name if scheme else "默认方案"
+            sim_name = f"{scene_name} - {scheme_name}"
+
+            sim_result = simulate_labor_scenario(
+                scene_config=scene,
+                labor_scheme=scheme,
+                well_config=well_config,
+                simulation_duration_min=data.simulation_duration_min or 120.0,
+                time_step_min=1.0
+            )
+
+            sim_result["simulation_name"] = sim_name
+            sim_result["scene_name"] = scene_name
+            sim_result["scheme_name"] = scheme_name
+
+            sim = SceneSimulation(
+                well_id=well_id,
+                scene_config_id=scene.id if scene else None,
+                labor_scheme_id=scheme.id if scheme else None,
+                config_id=data.config_id,
+                simulation_name=sim_name,
+                simulation_duration_min=data.simulation_duration_min or 120.0,
+                time_step_min=1.0,
+                total_water_l=sim_result["total_water_l"],
+                avg_flow_rate_lpm=sim_result["avg_flow_lpm"],
+                peak_flow_rate_lpm=sim_result["peak_flow_lpm"],
+                per_capita_flow_lpm=sim_result["per_capita_flow_lpm"],
+                efficiency_decay_pct=sim_result["efficiency_decay_pct"],
+                final_fatigue_level=sim_result["final_fatigue_level"],
+                avg_fatigue_level=sim_result["avg_fatigue_level"],
+                total_rest_min=sim_result["total_rest_min"],
+                total_work_min=sim_result["total_work_min"],
+                work_rest_ratio=sim_result["work_rest_ratio"],
+                stability_cv=sim_result["stability_cv"],
+                overall_score=sim_result["overall_score"]
+            )
+            db.add(sim)
+            db.flush()
+
+            from models import SimulationTimePoint
+            for tp_data in sim_result["time_points"]:
+                tp = SimulationTimePoint(
+                    simulation_id=sim.id,
+                    point_index=tp_data["point_index"],
+                    elapsed_min=tp_data["elapsed_min"],
+                    total_water_l=tp_data["total_water_l"],
+                    instantaneous_flow_lpm=tp_data["instantaneous_flow_lpm"],
+                    avg_fatigue_level=tp_data["avg_fatigue_level"],
+                    active_worker_count=tp_data["active_worker_count"],
+                    is_rest_period=tp_data["is_rest_period"],
+                    efficiency_factor=tp_data["efficiency_factor"]
+                )
+                db.add(tp)
+
+            simulation_results.append(sim_result)
+            simulation_items.append({
+                "simulation_id": sim.id,
+                "scene_config_id": scene.id if scene else None,
+                "labor_scheme_id": scheme.id if scheme else None,
+                "scene_name": scene_name,
+                "scheme_name": scheme_name,
+                "avg_flow_rate_lpm": sim_result["avg_flow_lpm"],
+                "per_capita_flow_lpm": sim_result["per_capita_flow_lpm"],
+                "efficiency_decay_pct": sim_result["efficiency_decay_pct"],
+                "overall_score": sim_result["overall_score"]
+            })
+
+    comparison = compare_simulations(simulation_results)
+    ranked = comparison.get("ranked_simulations", [])
+
+    best_scheme = None
+    optimal_worker_count = None
+    optimal_work_mode = ""
+    suggested_rest_rhythm = ""
+
+    if ranked:
+        best = ranked[0]
+        best_scheme_name = best.get("scheme_name", "")
+
+        best_scheme_obj = None
+        for s in labor_schemes:
+            if s and s.scheme_name == best_scheme_name:
+                best_scheme_obj = s
+                break
+
+        if best_scheme_obj:
+            best_scheme = best_scheme_obj
+            optimal_worker_count = best_scheme_obj.worker_count
+            optimal_work_mode = best_scheme_obj.work_mode
+            if best_scheme_obj.rest_interval_min and best_scheme_obj.rest_interval_min > 0:
+                suggested_rest_rhythm = f"每{best_scheme_obj.continuous_duration_min:.0f}分钟休息{best_scheme_obj.rest_duration_min:.0f}分钟"
+            else:
+                suggested_rest_rhythm = "连续作业"
+        else:
+            best_scheme_name = best.get("scheme_name", "")
+
+    rec = generate_optimization_recommendation(
+        scene_configs[0] if scene_configs and scene_configs[0] else None,
+        best_scheme,
+        ranked[0] if ranked else {}
+    ) if ranked else {"conclusion": "", "recommendations": []}
+
+    recommendation_text = "\n".join([
+        f"• {r['suggestion']}" for r in rec.get("recommendations", [])
+    ]) if rec.get("recommendations") else "当前配置表现良好，建议保持。"
+
+    report_data = {
+        "best_scheme_name": best_scheme.scheme_name if best_scheme else (ranked[0].get("scheme_name", "") if ranked else ""),
+        "optimal_worker_count": optimal_worker_count,
+        "optimal_work_mode": optimal_work_mode,
+        "suggested_rest_rhythm": suggested_rest_rhythm,
+        "recommendation": recommendation_text,
+        "conclusions": data.conclusions or ""
+    }
+
+    report_content = generate_scene_report_content(
+        well, scene_configs if scene_configs and scene_configs[0] else [],
+        labor_schemes if labor_schemes and labor_schemes[0] else [],
+        simulation_results, report_data
+    )
+
+    report = OptimizationReport(
+        well_id=well_id,
+        config_id=data.config_id,
+        report_title=data.report_title,
+        author=data.author or "",
+        summary=data.summary or "",
+        conclusions=data.conclusions or "",
+        report_content=report_content,
+        best_scheme_id=best_scheme.id if best_scheme else None,
+        best_scheme_name=report_data["best_scheme_name"],
+        scene_count=len([s for s in scene_configs if s]),
+        scheme_count=len([s for s in labor_schemes if s]),
+        recommendation=recommendation_text,
+        optimal_worker_count=optimal_worker_count,
+        optimal_work_mode=optimal_work_mode,
+        suggested_rest_rhythm=suggested_rest_rhythm
+    )
+    db.add(report)
+    db.flush()
+
+    for i, item in enumerate(sorted(simulation_items, key=lambda x: x["overall_score"], reverse=True)):
+        report_item = OptimizationReportItem(
+            report_id=report.id,
+            simulation_id=item["simulation_id"],
+            scene_config_id=item["scene_config_id"],
+            labor_scheme_id=item["labor_scheme_id"],
+            scene_name=item["scene_name"],
+            scheme_name=item["scheme_name"],
+            avg_flow_rate_lpm=item["avg_flow_rate_lpm"],
+            per_capita_flow_lpm=item["per_capita_flow_lpm"],
+            efficiency_decay_pct=item["efficiency_decay_pct"],
+            overall_score=item["overall_score"],
+            ranking=i + 1
+        )
+        db.add(report_item)
+
+    db.commit()
+    db.refresh(report)
+    return report
+
+
+def get_optimization_reports(db: Session, well_id: Optional[int] = None, skip: int = 0, limit: int = 100) -> List[OptimizationReport]:
+    from models import OptimizationReport
+    query = db.query(OptimizationReport)
+    if well_id:
+        query = query.filter(OptimizationReport.well_id == well_id)
+    return query.order_by(desc(OptimizationReport.created_at)).offset(skip).limit(limit).all()
+
+
+def get_optimization_report(db: Session, report_id: int) -> Optional[OptimizationReport]:
+    from models import OptimizationReport
+    return db.query(OptimizationReport).filter(OptimizationReport.id == report_id).first()
+
+
+def delete_optimization_report(db: Session, report_id: int) -> bool:
+    from models import OptimizationReport
+    report = get_optimization_report(db, report_id)
+    if report:
+        db.delete(report)
+        db.commit()
+        return True
+    return False
