@@ -324,6 +324,17 @@ async def update_experiment_api(
             if existing and existing.id != exp_id:
                 return JSONResponse({"success": False, "error": "该轮次已存在"}, status_code=400)
 
+        if time_points_data:
+            max_water = max(tp["water_l"] for tp in time_points_data)
+            if max_water > config.bucket_capacity_l:
+                return JSONResponse({"success": False, "error": f"出水量({max_water}L)超过桶容量({config.bucket_capacity_l}L)"}, status_code=400)
+            times = [tp["time_s"] for tp in time_points_data]
+            for i in range(1, len(times)):
+                if times[i] <= times[i - 1]:
+                    return JSONResponse({"success": False, "error": f"时间点必须严格递增：第{i+1}个时间点({times[i]})不大于第{i}个({times[i-1]})"}, status_code=400)
+            if len(time_points_data) < 2:
+                return JSONResponse({"success": False, "error": "至少需要2个时间点"}, status_code=400)
+
         if update_data.model_dump(exclude_unset=True):
             exp = update_experiment(db, exp, update_data, config)
 

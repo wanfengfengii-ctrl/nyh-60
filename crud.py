@@ -145,6 +145,10 @@ def activate_config(db: Session, config_id: int) -> Optional[WellConfig]:
     old_active = get_active_config(db, config.well_id)
     if old_active and old_active.id != config_id:
         old_active.status = "archived"
+        old_experiments = get_experiments(db, old_active.id)
+        for exp in old_experiments:
+            if exp.review_status == "valid":
+                exp.review_status = "pending_review"
     config.status = "active"
     db.commit()
     db.refresh(config)

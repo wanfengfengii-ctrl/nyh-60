@@ -49,7 +49,7 @@
                 </div>
                 <div class="stat-card">
                     <span class="stat-label">每小时出水量</span>
-                    <span class="stat-value">{{ (report.avg_flow_rate_lpm * 60)|round(1) }}</span>
+                    <span class="stat-value">{{ (report.avg_flow_rate_lpm * 60)|round(1) if report.avg_flow_rate_lpm else 0 }}</span>
                     <span class="stat-unit">L/h</span>
                 </div>
             </div>
