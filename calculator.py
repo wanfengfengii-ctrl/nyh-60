@@ -1018,3 +1018,358 @@ def generate_scene_report_content(well, scene_configs, labor_schemes, simulation
     lines.append(f"*模拟场景数: {len(scene_configs)} | 劳作方案数: {len(labor_schemes)} | 模拟总次数: {len(simulation_results)}*")
 
     return "\n".join(lines)
+
+
+def calculate_hydro_season_efficiency_curve(data_points: list) -> list:
+    if len(data_points) < 2:
+        return []
+    curve = []
+    for dp in data_points:
+        curve.append({
+            "elapsed_min": dp.elapsed_min,
+            "flow_rate_lpm": dp.flow_rate_lpm,
+            "draw_efficiency_pct": dp.draw_efficiency_pct,
+        })
+    return curve
+
+
+def calculate_hydro_water_level_trend(data_points: list) -> list:
+    if len(data_points) < 2:
+        return []
+    trend = []
+    for dp in data_points:
+        trend.append({
+            "elapsed_min": dp.elapsed_min,
+            "water_level_m": dp.water_level_m,
+            "water_temp_c": dp.water_temp_c,
+        })
+    return trend
+
+
+def calculate_hydro_env_sensitivity_coefficient(data_points: list) -> float:
+    if len(data_points) < 3:
+        return 0.0
+    flows = [dp.flow_rate_lpm for dp in data_points]
+    levels = [dp.water_level_m for dp in data_points]
+    temps = [dp.water_temp_c for dp in data_points]
+    valid_pairs = [(f, l, t) for f, l, t in zip(flows, levels, temps) if f > 0]
+    if len(valid_pairs) < 3:
+        return 0.0
+    n = len(valid_pairs)
+    f_vals = [p[0] for p in valid_pairs]
+    mean_f = sum(f_vals) / n
+    if mean_f <= 0:
+        return 0.0
+    variance = sum((f - mean_f) ** 2 for f in f_vals) / n
+    std_f = math.sqrt(variance) if variance > 0 else 0
+    cv = std_f / mean_f
+    l_vals = [p[1] for p in valid_pairs]
+    t_vals = [p[2] for p in valid_pairs]
+    level_range = max(l_vals) - min(l_vals) if l_vals else 0
+    temp_range = max(t_vals) - min(t_vals) if t_vals else 0
+    env_variability = 0.0
+    if level_range > 0:
+        l_var = sum((l - sum(l_vals) / n) ** 2 for l in l_vals) / n
+        l_std = math.sqrt(l_var) if l_var > 0 else 0
+        l_cv = l_std / (sum(l_vals) / n) if sum(l_vals) > 0 else 0
+        env_variability += l_cv
+    if temp_range > 0:
+        t_var = sum((t - sum(t_vals) / n) ** 2 for t in t_vals) / n
+        t_std = math.sqrt(t_var) if t_var > 0 else 0
+        t_cv = t_std / (sum(t_vals) / n) if sum(t_vals) > 0 else 0
+        env_variability += t_cv
+    if env_variability <= 0:
+        return 0.0
+    sensitivity = cv / env_variability
+    return round(min(2.0, max(0.0, sensitivity)), 4)
+
+
+def calculate_hydro_efficiency_periods(data_points: list) -> tuple:
+    high_periods = []
+    low_periods = []
+    if len(data_points) < 2:
+        return high_periods, low_periods
+    
+    efficiencies = []
+    for dp in data_points:
+        if hasattr(dp, 'draw_efficiency_pct') and dp.draw_efficiency_pct is not None:
+            efficiencies.append(dp.draw_efficiency_pct)
+        elif hasattr(dp, 'flow_rate_lpm') and dp.flow_rate_lpm is not None:
+            efficiencies.append(dp.flow_rate_lpm)
+        else:
+            efficiencies.append(0)
+    
+    valid_effs = [e for e in efficiencies if e > 0]
+    if not valid_effs:
+        return high_periods, low_periods
+    
+    mean_eff = sum(valid_effs) / len(valid_effs)
+    
+    if all(hasattr(dp, 'draw_efficiency_pct') and dp.draw_efficiency_pct is not None for dp in data_points):
+        high_threshold = 70.0
+        low_threshold = 40.0
+        use_percent = True
+    else:
+        high_threshold = mean_eff * 1.15
+        low_threshold = mean_eff * 0.85
+        use_percent = False
+    
+    i = 0
+    n = len(data_points)
+    
+    while i < n:
+        if efficiencies[i] >= high_threshold and efficiencies[i] > 0:
+            start_idx = i
+            sum_eff = 0
+            count = 0
+            while i < n and efficiencies[i] >= high_threshold and efficiencies[i] > 0:
+                sum_eff += efficiencies[i]
+                count += 1
+                i += 1
+            end_idx = i - 1
+            avg_eff = sum_eff / count if count > 0 else 0
+            high_periods.append({
+                "start_min": round(data_points[start_idx].elapsed_min, 2),
+                "end_min": round(data_points[end_idx].elapsed_min, 2),
+                "duration_min": round(data_points[end_idx].elapsed_min - data_points[start_idx].elapsed_min, 2),
+                "avg_efficiency": round(avg_eff, 2),
+                "data_points": count,
+                "is_percent": use_percent
+            })
+        elif efficiencies[i] <= low_threshold and efficiencies[i] > 0:
+            start_idx = i
+            sum_eff = 0
+            count = 0
+            while i < n and efficiencies[i] <= low_threshold and efficiencies[i] > 0:
+                sum_eff += efficiencies[i]
+                count += 1
+                i += 1
+            end_idx = i - 1
+            avg_eff = sum_eff / count if count > 0 else 0
+            low_periods.append({
+                "start_min": round(data_points[start_idx].elapsed_min, 2),
+                "end_min": round(data_points[end_idx].elapsed_min, 2),
+                "duration_min": round(data_points[end_idx].elapsed_min - data_points[start_idx].elapsed_min, 2),
+                "avg_efficiency": round(avg_eff, 2),
+                "data_points": count,
+                "is_percent": use_percent
+            })
+        else:
+            i += 1
+    
+    return high_periods, low_periods
+
+
+def calculate_hydro_correlation(x_vals: list, y_vals: list) -> float:
+    paired = [(x, y) for x, y in zip(x_vals, y_vals) if x is not None and y is not None]
+    if len(paired) < 3:
+        return 0.0
+    n = len(paired)
+    xs = [p[0] for p in paired]
+    ys = [p[1] for p in paired]
+    mean_x = sum(xs) / n
+    mean_y = sum(ys) / n
+    numerator = sum((xs[i] - mean_x) * (ys[i] - mean_y) for i in range(n))
+    denom_x = math.sqrt(sum((x - mean_x) ** 2 for x in xs))
+    denom_y = math.sqrt(sum((y - mean_y) ** 2 for y in ys))
+    if denom_x == 0 or denom_y == 0:
+        return 0.0
+    return round(numerator / (denom_x * denom_y), 4)
+
+
+def detect_hydro_anomalies(data_points: list) -> list:
+    warnings = []
+    if len(data_points) < 3:
+        return warnings
+    flows = [dp.flow_rate_lpm for dp in data_points]
+    valid_flows = [f for f in flows if f > 0]
+    if len(valid_flows) < 3:
+        return warnings
+    mean_flow = sum(valid_flows) / len(valid_flows)
+    variance = sum((f - mean_flow) ** 2 for f in valid_flows) / len(valid_flows)
+    std_flow = math.sqrt(variance) if variance > 0 else 0.001
+    for i, dp in enumerate(data_points):
+        if dp.flow_rate_lpm <= 0:
+            continue
+        z_score = abs(dp.flow_rate_lpm - mean_flow) / std_flow if std_flow > 0 else 0
+        if z_score > 2.0:
+            warning_type = "flow_spike" if dp.flow_rate_lpm > mean_flow else "flow_drop"
+            warnings.append({
+                "point_index": i,
+                "elapsed_min": dp.elapsed_min,
+                "flow_rate_lpm": dp.flow_rate_lpm,
+                "type": warning_type,
+                "z_score": round(z_score, 2),
+                "description": f"在{dp.elapsed_min}min处出水量{'偏高' if dp.flow_rate_lpm > mean_flow else '偏低'}，偏离均值{round(z_score, 1)}倍标准差"
+            })
+    levels = [dp.water_level_m for dp in data_points]
+    for i in range(1, len(levels)):
+        if levels[i] > 0 and levels[i - 1] > 0:
+            change = (levels[i] - levels[i - 1]) / levels[i - 1] * 100
+            if abs(change) > 10:
+                warnings.append({
+                    "point_index": i,
+                    "elapsed_min": data_points[i].elapsed_min,
+                    "type": "water_level_shift",
+                    "change_pct": round(change, 1),
+                    "description": f"在{data_points[i].elapsed_min}min处地下水位{'上升' if change > 0 else '下降'}{abs(round(change, 1))}%"
+                })
+    return warnings
+
+
+def calculate_hydro_analysis(experiment, data_points: list) -> dict:
+    import json
+    if len(data_points) < 2:
+        return {}
+    season_curve = calculate_hydro_season_efficiency_curve(data_points)
+    water_level_trend = calculate_hydro_water_level_trend(data_points)
+    env_sensitivity = calculate_hydro_env_sensitivity_coefficient(data_points)
+    high_periods, low_periods = calculate_hydro_efficiency_periods(data_points)
+    anomaly_warnings = detect_hydro_anomalies(data_points)
+    flows = [dp.flow_rate_lpm for dp in data_points]
+    valid_flows = [f for f in flows if f > 0]
+    avg_flow = sum(valid_flows) / len(valid_flows) if valid_flows else 0
+    peak_flow = max(valid_flows) if valid_flows else 0
+    stabilities = [dp.stability_index for dp in data_points]
+    avg_stability = sum(stabilities) / len(stabilities) if stabilities else 0
+    burdens = [dp.labor_burden_score for dp in data_points]
+    avg_burden = sum(burdens) / len(burdens) if burdens else 0
+    levels = [dp.water_level_m for dp in data_points]
+    level_change_pct = 0.0
+    if len(levels) >= 2 and levels[0] > 0:
+        level_change_pct = round((levels[-1] - levels[0]) / levels[0] * 100, 2)
+    temps = [dp.water_temp_c for dp in data_points]
+    temp_corr = calculate_hydro_correlation(temps, flows)
+    level_corr = calculate_hydro_correlation(levels, flows)
+    quality_map = {"清澈": 1.0, "微浊": 0.8, "浑浊": 0.5, "异味": 0.3, "干涸": 0.0}
+    quality_val = quality_map.get(getattr(experiment, 'water_quality', '清澈'), 1.0)
+    quality_correlations = [quality_val] * len(flows)
+    quality_corr = calculate_hydro_correlation(quality_correlations, flows)
+    score_flow = min(1.0, avg_flow / 20.0) * 0.25
+    score_stability = min(1.0, avg_stability) * 0.2
+    score_sensitivity = max(0.0, 1.0 - env_sensitivity) * 0.15
+    score_burden = max(0.0, 1.0 - avg_burden / 10.0) * 0.15
+    score_quality = quality_val * 0.15
+    score_level = max(0.0, 1.0 - abs(level_change_pct) / 50.0) * 0.1
+    overall_score = round(score_flow + score_stability + score_sensitivity + score_burden + score_quality + score_level, 4)
+    return {
+        "season_efficiency_curve_json": json.dumps(season_curve, ensure_ascii=False),
+        "water_level_trend_json": json.dumps(water_level_trend, ensure_ascii=False),
+        "env_sensitivity_coefficient": env_sensitivity,
+        "high_efficiency_periods_json": json.dumps(high_periods, ensure_ascii=False),
+        "low_efficiency_periods_json": json.dumps(low_periods, ensure_ascii=False),
+        "avg_flow_rate_lpm": round(avg_flow, 4),
+        "peak_flow_rate_lpm": round(peak_flow, 4),
+        "avg_stability_index": round(avg_stability, 4),
+        "avg_labor_burden": round(avg_burden, 4),
+        "water_level_change_pct": level_change_pct,
+        "temp_efficiency_corr": temp_corr,
+        "level_efficiency_corr": level_corr,
+        "quality_efficiency_corr": quality_corr,
+        "anomaly_warnings_json": json.dumps(anomaly_warnings, ensure_ascii=False),
+        "overall_score": overall_score,
+    }
+
+
+def calculate_hydro_period_comparison(experiments_data: list) -> dict:
+    import json
+    if len(experiments_data) < 2:
+        return {}
+    sorted_by_season = sorted(experiments_data, key=lambda e: {"春季": 1, "夏季": 2, "秋季": 3, "冬季": 4}.get(e.get("season", "春季"), 1))
+    season_comparison = []
+    for exp in sorted_by_season:
+        analysis = exp.get("analysis_result", {}) or {}
+        season_comparison.append({
+            "experiment_id": exp.get("id"),
+            "experiment_name": exp.get("experiment_name", ""),
+            "season": exp.get("season", ""),
+            "weather": exp.get("weather", ""),
+            "water_quality": exp.get("water_quality", ""),
+            "avg_flow_rate_lpm": analysis.get("avg_flow_rate_lpm", 0),
+            "peak_flow_rate_lpm": analysis.get("peak_flow_rate_lpm", 0),
+            "avg_stability_index": analysis.get("avg_stability_index", 0),
+            "avg_labor_burden": analysis.get("avg_labor_burden", 0),
+            "env_sensitivity_coefficient": analysis.get("env_sensitivity_coefficient", 0),
+            "overall_score": analysis.get("overall_score", 0),
+        })
+    best_overall = max(season_comparison, key=lambda x: x["overall_score"]) if season_comparison else None
+    best_flow = max(season_comparison, key=lambda x: x["avg_flow_rate_lpm"]) if season_comparison else None
+    best_stability = max(season_comparison, key=lambda x: x["avg_stability_index"]) if season_comparison else None
+    recommendations = []
+    if best_overall:
+        recommendations.append(f"综合表现最优：{best_overall['season']}({best_overall['experiment_name']}), 评分{best_overall['overall_score']:.1f}")
+    if best_flow:
+        recommendations.append(f"平均出水量最高：{best_flow['season']}({best_flow['experiment_name']}), {best_flow['avg_flow_rate_lpm']:.2f}L/min")
+    if best_stability:
+        recommendations.append(f"出水稳定性最佳：{best_stability['season']}({best_stability['experiment_name']}), 稳定性指数{best_stability['avg_stability_index']:.3f}")
+    return {
+        "season_comparison": season_comparison,
+        "best_overall": best_overall,
+        "best_flow": best_flow,
+        "best_stability": best_stability,
+        "recommendations": recommendations,
+    }
+
+
+def generate_hydro_report_content(well, experiments, period_comparisons, report_data: dict) -> str:
+    import json
+    lines = []
+    lines.append(f"# {well.name} - 水文环境与季节波动研究报告")
+    lines.append("")
+    lines.append("## 一、研究背景")
+    lines.append("本报告针对古井在不同季节、天气、地下水位、井水温度、水质状态和取水频率条件下的汲水表现，")
+    lines.append("系统分析环境变化对汲水效率、出水稳定性和人工负荷的影响，揭示水文环境与汲水效率的关联规律。")
+    lines.append("")
+
+    lines.append("## 二、研究对象")
+    lines.append(f"- **古井名称**: {well.name}")
+    if well.location:
+        lines.append(f"- **地理位置**: {well.location}")
+    if well.dynasty:
+        lines.append(f"- **历史年代**: {well.dynasty}")
+    lines.append(f"- **实验记录数**: {len(experiments)}")
+    lines.append("")
+
+    lines.append("## 三、实验环境条件汇总")
+    lines.append("")
+    lines.append("| 实验名称 | 季节 | 天气 | 水位(m) | 水温(°C) | 水质 | 取水频率 |")
+    lines.append("|----------|------|------|---------|----------|------|----------|")
+    for exp in experiments:
+        lines.append(f"| {exp.experiment_name} | {exp.season} | {exp.weather} | {exp.underground_water_level_m} | {exp.well_water_temp_c} | {exp.water_quality} | {exp.draw_frequency}次/日 |")
+    lines.append("")
+
+    lines.append("## 四、关键分析指标")
+    lines.append("")
+    lines.append("| 实验名称 | 平均出水量(L/min) | 峰值出水量 | 稳定性指数 | 人工负荷 | 水位变化(%) | 环境敏感系数 | 综合评分 |")
+    lines.append("|----------|-------------------|------------|------------|----------|-------------|-------------|----------|")
+    for exp in experiments:
+        a = exp.analysis_result
+        if a:
+            lines.append(f"| {exp.experiment_name} | {a.avg_flow_rate_lpm:.2f} | {a.peak_flow_rate_lpm:.2f} | {a.avg_stability_index:.3f} | {a.avg_labor_burden:.2f} | {a.water_level_change_pct:.1f} | {a.env_sensitivity_coefficient:.4f} | {a.overall_score:.1f} |")
+    lines.append("")
+
+    if period_comparisons:
+        lines.append("## 五、多时间周期对比")
+        for comp in period_comparisons:
+            lines.append(f"### {comp.get('period_name', '未命名')}")
+            sc = comp.get("season_comparison", [])
+            if sc:
+                for item in sc:
+                    lines.append(f"- **{item['season']}** ({item['experiment_name']}): 平均出水量{item['avg_flow_rate_lpm']:.2f}L/min, 综合评分{item['overall_score']:.1f}")
+            recs = comp.get("recommendations", [])
+            if recs:
+                lines.append("")
+                lines.append("**对比结论：**")
+                for rec in recs:
+                    lines.append(f"- {rec}")
+            lines.append("")
+
+    if report_data.get("conclusions"):
+        lines.append("## 六、结论")
+        lines.append(report_data["conclusions"])
+        lines.append("")
+
+    lines.append("---")
+    lines.append(f"*报告生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*")
+    lines.append(f"*实验数: {len(experiments)} | 对比组数: {len(period_comparisons)}*")
+    return "\n".join(lines)

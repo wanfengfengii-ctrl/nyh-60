@@ -426,3 +426,114 @@ class OptimizationReportItem(Base):
 
     report = relationship("OptimizationReport", back_populates="items")
     simulation = relationship("SceneSimulation")
+
+
+class HydroExperiment(Base):
+    __tablename__ = "hydro_experiment"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    well_id = Column(Integer, ForeignKey("well.id", ondelete="CASCADE"), nullable=False)
+    config_id = Column(Integer, ForeignKey("well_config.id", ondelete="CASCADE"))
+    experiment_name = Column(String(200), nullable=False)
+    season = Column(String(20), default="春季")
+    weather = Column(String(50), default="晴天")
+    underground_water_level_m = Column(Float, default=0.0)
+    well_water_temp_c = Column(Float, default=15.0)
+    water_quality = Column(String(50), default="清澈")
+    draw_frequency = Column(Integer, default=1)
+    observation_date = Column(String(20), default="")
+    notes = Column(Text, default="")
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    __table_args__ = (
+        CheckConstraint("underground_water_level_m >= 0", name="ck_hydro_water_level_non_neg"),
+        CheckConstraint("well_water_temp_c >= -10 AND well_water_temp_c <= 50", name="ck_hydro_water_temp_range"),
+        CheckConstraint("draw_frequency >= 1", name="ck_hydro_draw_freq_positive"),
+    )
+
+    well = relationship("Well")
+    config = relationship("WellConfig")
+    data_points = relationship("HydroExperimentDataPoint", back_populates="experiment", cascade="all, delete-orphan", order_by="HydroExperimentDataPoint.point_index")
+    analysis_result = relationship("HydroAnalysisResult", back_populates="experiment", cascade="all, delete-orphan", uselist=False)
+
+
+class HydroExperimentDataPoint(Base):
+    __tablename__ = "hydro_experiment_data_point"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    experiment_id = Column(Integer, ForeignKey("hydro_experiment.id", ondelete="CASCADE"), nullable=False)
+    point_index = Column(Integer, nullable=False)
+    elapsed_min = Column(Float, nullable=False)
+    water_level_m = Column(Float, default=0.0)
+    water_temp_c = Column(Float, default=15.0)
+    flow_rate_lpm = Column(Float, default=0.0)
+    draw_efficiency_pct = Column(Float, default=100.0)
+    labor_burden_score = Column(Float, default=0.0)
+    stability_index = Column(Float, default=1.0)
+
+    __table_args__ = (
+        CheckConstraint("elapsed_min >= 0", name="ck_hydro_elapsed_non_neg"),
+        CheckConstraint("water_level_m >= 0", name="ck_hydro_dp_water_level_non_neg"),
+        UniqueConstraint("experiment_id", "point_index", name="uq_hydro_exp_point"),
+    )
+
+    experiment = relationship("HydroExperiment", back_populates="data_points")
+
+
+class HydroAnalysisResult(Base):
+    __tablename__ = "hydro_analysis_result"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    experiment_id = Column(Integer, ForeignKey("hydro_experiment.id", ondelete="CASCADE"), nullable=False, unique=True)
+    season_efficiency_curve_json = Column(Text, default="")
+    water_level_trend_json = Column(Text, default="")
+    env_sensitivity_coefficient = Column(Float, default=0.0)
+    high_efficiency_periods_json = Column(Text, default="")
+    low_efficiency_periods_json = Column(Text, default="")
+    avg_flow_rate_lpm = Column(Float, default=0.0)
+    peak_flow_rate_lpm = Column(Float, default=0.0)
+    avg_stability_index = Column(Float, default=0.0)
+    avg_labor_burden = Column(Float, default=0.0)
+    water_level_change_pct = Column(Float, default=0.0)
+    temp_efficiency_corr = Column(Float, default=0.0)
+    level_efficiency_corr = Column(Float, default=0.0)
+    quality_efficiency_corr = Column(Float, default=0.0)
+    anomaly_warnings_json = Column(Text, default="")
+    overall_score = Column(Float, default=0.0)
+    created_at = Column(DateTime, default=datetime.now)
+
+    experiment = relationship("HydroExperiment", back_populates="analysis_result")
+
+
+class HydroComparisonPeriod(Base):
+    __tablename__ = "hydro_comparison_period"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    well_id = Column(Integer, ForeignKey("well.id", ondelete="CASCADE"), nullable=False)
+    period_name = Column(String(200), nullable=False)
+    description = Column(Text, default="")
+    experiment_ids_json = Column(Text, default="")
+    comparison_result_json = Column(Text, default="")
+    created_at = Column(DateTime, default=datetime.now)
+
+    well = relationship("Well")
+
+
+class HydroResearchReport(Base):
+    __tablename__ = "hydro_research_report"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    well_id = Column(Integer, ForeignKey("well.id", ondelete="CASCADE"), nullable=False)
+    title = Column(String(200), nullable=False)
+    author = Column(String(100), default="")
+    summary = Column(Text, default="")
+    conclusions = Column(Text, default="")
+    report_content = Column(Text, default="")
+    experiment_count = Column(Integer, default=0)
+    period_count = Column(Integer, default=0)
+    key_findings_json = Column(Text, default="")
+    recommendations = Column(Text, default="")
+    created_at = Column(DateTime, default=datetime.now)
+
+    well = relationship("Well")

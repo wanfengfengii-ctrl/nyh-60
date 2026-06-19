@@ -22,7 +22,9 @@ from schemas import (
     LaborTimePointCreate, LaborComparisonGroupCreate,
     SceneConfigCreate, SceneConfigUpdate,
     LaborSchemeCreate, LaborSchemeUpdate,
-    OptimizationReportCreate
+    OptimizationReportCreate,
+    HydroExperimentCreate, HydroExperimentUpdate,
+    HydroComparisonPeriodCreate, HydroResearchReportCreate
 )
 from crud import (
     get_wells, get_well, create_well, update_well, delete_well,
@@ -44,7 +46,14 @@ from crud import (
     get_scene_configs, get_scene_config, create_scene_config, update_scene_config, delete_scene_config,
     get_labor_schemes, get_labor_scheme, create_labor_scheme, update_labor_scheme, delete_labor_scheme,
     run_scene_simulation, get_simulations, get_simulation, delete_simulation,
-    create_optimization_report, get_optimization_reports, get_optimization_report, delete_optimization_report
+    create_optimization_report, get_optimization_reports, get_optimization_report, delete_optimization_report,
+    get_hydro_experiments, get_hydro_experiment, create_hydro_experiment,
+    update_hydro_experiment, update_hydro_data_points, delete_hydro_experiment,
+    recalculate_hydro_experiment,
+    get_hydro_comparison_periods, get_hydro_comparison_period,
+    create_hydro_comparison_period, delete_hydro_comparison_period,
+    get_hydro_research_reports, get_hydro_research_report,
+    create_hydro_research_report, delete_hydro_research_report
 )
 from calculator import calculate_experiment_efficiency
 
@@ -1587,6 +1596,513 @@ async def optimization_report_detail_page(request: Request, report_id: int, db: 
     })
 
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+@app.get("/hydro-environment", response_class=HTMLResponse)
+async def hydro_environment_page(request: Request, db: Session = Depends(get_db)):
+    wells = get_wells(db)
+    pending_count = len(get_all_pending_reviews(db))
+    hydro_experiments = get_hydro_experiments(db)
+    comparison_periods = get_hydro_comparison_periods(db)
+    hydro_reports = get_hydro_research_reports(db)
+    return templates.TemplateResponse("hydro_environment.html", {
+        "request": request,
+        "wells": wells,
+        "pending_count": pending_count,
+        "hydro_experiments": hydro_experiments,
+        "comparison_periods": comparison_periods,
+        "hydro_reports": hydro_reports
+    })
+
+
+@app.post("/wells/{well_id}/hydro-experiments")
+async def create_hydro_experiment_endpoint(
+    well_id: int,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    well = get_well(db, well_id)
+    if not well:
+        return JSONResponse({"success": False, "error": "古井档案不存在"}, status_code=404)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"success": False, "error": "请求数据格式错误"}, status_code=400)
+
+    data_points_raw = body.get("data_points", [])
+    meta = body.get("meta", None)
+    if meta:
+        get_field = lambda k, default=None: meta.get(k, body.get(k, default))
+    else:
+        get_field = lambda k, default=None: body.get(k, default)
+
+    try:
+        from schemas import HydroDataPointCreate
+        data_points = [HydroDataPointCreate(**dp) for dp in data_points_raw]
+    except ValidationError as e:
+        errors = "; ".join([f"数据点{err['loc'][-1]}: {err['msg']}" for err in e.errors()])
+        return JSONResponse({"success": False, "error": f"数据点错误: {errors}"}, status_code=400)
+
+    try:
+        exp_data = HydroExperimentCreate(
+            experiment_name=get_field("experiment_name", ""),
+            season=get_field("season", "春季"),
+            weather=get_field("weather", "晴天"),
+            underground_water_level_m=float(get_field("underground_water_level_m", 0) or 0),
+            well_water_temp_c=float(get_field("well_water_temp_c", 15) or 15),
+            water_quality=get_field("water_quality", "清澈"),
+            draw_frequency=int(get_field("draw_frequency", 1) or 1),
+            observation_date=get_field("observation_date", ""),
+            notes=get_field("notes", ""),
+            config_id=int(get_field("config_id")) if get_field("config_id") else None,
+            data_points=data_points
+        )
+    except ValidationError as e:
+        errors = "; ".join([err["msg"] for err in e.errors()])
+        return JSONResponse({"success": False, "error": f"数据错误: {errors}"}, status_code=400)
+
+    try:
+        exp = create_hydro_experiment(db, exp_data, well_id)
+    except ValueError as e:
+        return JSONResponse({"success": False, "error": str(e)}, status_code=400)
+
+    return JSONResponse({"success": True, "experiment_id": exp.id, "redirect": "/hydro-environment"})
+
+
+@app.get("/api/hydro-experiments/{exp_id}")
+async def get_hydro_experiment_api(exp_id: int, db: Session = Depends(get_db)):
+    import json
+    exp = get_hydro_experiment(db, exp_id)
+    if not exp:
+        raise HTTPException(status_code=404, detail="水文实验不存在")
+
+    data_points = []
+    for dp in exp.data_points:
+        data_points.append({
+            "id": dp.id,
+            "point_index": dp.point_index,
+            "elapsed_min": dp.elapsed_min,
+            "water_level_m": dp.water_level_m,
+            "water_temp_c": dp.water_temp_c,
+            "flow_rate_lpm": dp.flow_rate_lpm,
+            "draw_efficiency_pct": dp.draw_efficiency_pct,
+            "labor_burden_score": dp.labor_burden_score,
+            "stability_index": dp.stability_index,
+        })
+
+    analysis_resp = None
+    if exp.analysis_result:
+        a = exp.analysis_result
+        anomaly_list = json.loads(a.anomaly_warnings_json) if a.anomaly_warnings_json else []
+        analysis_resp = {
+            "env_sensitivity_coefficient": a.env_sensitivity_coefficient,
+            "avg_flow_rate_lpm": a.avg_flow_rate_lpm,
+            "peak_flow_rate_lpm": a.peak_flow_rate_lpm,
+            "avg_stability_index": a.avg_stability_index,
+            "avg_labor_burden": a.avg_labor_burden,
+            "water_level_change_pct": a.water_level_change_pct,
+            "temp_efficiency_corr": a.temp_efficiency_corr,
+            "level_efficiency_corr": a.level_efficiency_corr,
+            "quality_efficiency_corr": a.quality_efficiency_corr,
+            "overall_score": a.overall_score,
+            "season_efficiency_curve": json.loads(a.season_efficiency_curve_json) if a.season_efficiency_curve_json else [],
+            "water_level_trend": json.loads(a.water_level_trend_json) if a.water_level_trend_json else [],
+            "high_efficiency_periods": json.loads(a.high_efficiency_periods_json) if a.high_efficiency_periods_json else [],
+            "low_efficiency_periods": json.loads(a.low_efficiency_periods_json) if a.low_efficiency_periods_json else [],
+            "anomaly_warnings": anomaly_list,
+            "avg_flow_rate": a.avg_flow_rate_lpm,
+            "peak_flow": a.peak_flow_rate_lpm,
+            "env_sensitivity": a.env_sensitivity_coefficient,
+            "stability_index": a.avg_stability_index,
+            "labor_burden": a.avg_labor_burden,
+            "anomaly_list": anomaly_list,
+            "anomaly_flags": ";".join([w.get("type", "") for w in anomaly_list]) if anomaly_list else ""
+        }
+
+    return JSONResponse({
+        "success": True,
+        "id": exp.id,
+        "well_id": exp.well_id,
+        "config_id": exp.config_id,
+        "experiment_name": exp.experiment_name,
+        "season": exp.season,
+        "weather": exp.weather,
+        "underground_water_level_m": exp.underground_water_level_m,
+        "well_water_temp_c": exp.well_water_temp_c,
+        "water_quality": exp.water_quality,
+        "draw_frequency": exp.draw_frequency,
+        "observation_date": exp.observation_date,
+        "notes": exp.notes or "",
+        "created_at": exp.created_at.strftime("%Y-%m-%d %H:%M:%S") if exp.created_at else None,
+        "data_points": data_points,
+        "analysis_result": analysis_resp,
+    })
+
+
+@app.put("/api/hydro-experiments/{exp_id}")
+async def update_hydro_experiment_api(
+    exp_id: int,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    exp = get_hydro_experiment(db, exp_id)
+    if not exp:
+        raise HTTPException(status_code=404, detail="水文实验不存在")
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"success": False, "error": "请求数据格式错误"}, status_code=400)
+
+    meta = body.get("meta", {})
+    data_points_data = body.get("data_points", None)
+
+    try:
+        if meta:
+            update_data = HydroExperimentUpdate(**meta)
+            exp = update_hydro_experiment(db, exp, update_data)
+
+        if data_points_data is not None:
+            if len(data_points_data) < 2:
+                return JSONResponse({"success": False, "error": "至少需要2个数据点"}, status_code=400)
+            exp = update_hydro_data_points(db, exp, data_points_data)
+
+        return JSONResponse({"success": True, "experiment_id": exp.id})
+    except ValidationError as e:
+        errors = "; ".join([err["msg"] for err in e.errors()])
+        return JSONResponse({"success": False, "error": f"数据错误: {errors}"}, status_code=400)
+    except ValueError as e:
+        return JSONResponse({"success": False, "error": str(e)}, status_code=400)
+
+
+@app.post("/hydro-experiments/{exp_id}/delete")
+async def delete_hydro_experiment_endpoint(exp_id: int, db: Session = Depends(get_db)):
+    if not delete_hydro_experiment(db, exp_id):
+        raise HTTPException(status_code=404, detail="水文实验不存在")
+    return RedirectResponse(url="/hydro-environment", status_code=303)
+
+
+@app.post("/api/hydro-experiments/{exp_id}/recalculate")
+async def recalculate_hydro_experiment_api(exp_id: int, db: Session = Depends(get_db)):
+    exp = get_hydro_experiment(db, exp_id)
+    if not exp:
+        raise HTTPException(status_code=404, detail="水文实验不存在")
+    try:
+        result = recalculate_hydro_experiment(db, exp)
+        return JSONResponse({"success": True, "analysis_id": result.id})
+    except Exception as e:
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/wells/{well_id}/hydro-experiments")
+async def get_well_hydro_experiments_api(well_id: int, db: Session = Depends(get_db)):
+    import json
+    well = get_well(db, well_id)
+    if not well:
+        raise HTTPException(status_code=404, detail="古井档案不存在")
+    experiments = get_hydro_experiments(db, well_id=well_id)
+    result = []
+    for exp in experiments:
+        analysis = exp.analysis_result
+        analysis_dict = None
+        if analysis:
+            anomaly_list = json.loads(analysis.anomaly_warnings_json) if analysis.anomaly_warnings_json else []
+            analysis_dict = {
+                "env_sensitivity_coefficient": analysis.env_sensitivity_coefficient,
+                "avg_flow_rate_lpm": analysis.avg_flow_rate_lpm,
+                "peak_flow_rate_lpm": analysis.peak_flow_rate_lpm,
+                "avg_stability_index": analysis.avg_stability_index,
+                "avg_labor_burden": analysis.avg_labor_burden,
+                "water_level_change_pct": analysis.water_level_change_pct,
+                "temp_efficiency_corr": analysis.temp_efficiency_corr,
+                "level_efficiency_corr": analysis.level_efficiency_corr,
+                "quality_efficiency_corr": analysis.quality_efficiency_corr,
+                "overall_score": analysis.overall_score,
+                "anomaly_warnings": anomaly_list,
+                "season_efficiency_curve": json.loads(analysis.season_efficiency_curve_json) if analysis.season_efficiency_curve_json else [],
+                "water_level_trend": json.loads(analysis.water_level_trend_json) if analysis.water_level_trend_json else [],
+                "high_efficiency_periods": json.loads(analysis.high_efficiency_periods_json) if analysis.high_efficiency_periods_json else [],
+                "low_efficiency_periods": json.loads(analysis.low_efficiency_periods_json) if analysis.low_efficiency_periods_json else [],
+                "avg_flow_rate": analysis.avg_flow_rate_lpm,
+                "peak_flow": analysis.peak_flow_rate_lpm,
+                "env_sensitivity": analysis.env_sensitivity_coefficient,
+                "stability_index": analysis.avg_stability_index,
+                "labor_burden": analysis.avg_labor_burden,
+                "anomaly_list": anomaly_list,
+                "anomaly_flags": ";".join([w.get("type", "") for w in anomaly_list]) if anomaly_list else ""
+            }
+        dps = []
+        for dp in exp.data_points:
+            dps.append({
+                "point_index": dp.point_index,
+                "elapsed_min": dp.elapsed_min,
+                "water_level_m": dp.water_level_m,
+                "water_temp_c": dp.water_temp_c,
+                "flow_rate_lpm": dp.flow_rate_lpm,
+                "draw_efficiency_pct": dp.draw_efficiency_pct,
+                "labor_burden_score": dp.labor_burden_score,
+                "stability_index": dp.stability_index,
+            })
+        result.append({
+            "id": exp.id,
+            "experiment_name": exp.experiment_name,
+            "season": exp.season,
+            "weather": exp.weather,
+            "underground_water_level_m": exp.underground_water_level_m,
+            "well_water_temp_c": exp.well_water_temp_c,
+            "water_quality": exp.water_quality,
+            "draw_frequency": exp.draw_frequency,
+            "observation_date": exp.observation_date,
+            "data_points": dps,
+            "analysis_result": analysis_dict,
+        })
+    return JSONResponse({"experiments": result})
+
+
+@app.post("/api/wells/{well_id}/hydro-comparisons")
+async def create_hydro_comparison_endpoint(
+    well_id: int,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    well = get_well(db, well_id)
+    if not well:
+        return JSONResponse({"success": False, "error": "古井档案不存在"}, status_code=404)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"success": False, "error": "请求数据格式错误"}, status_code=400)
+
+    try:
+        data = HydroComparisonPeriodCreate(**body)
+    except ValidationError as e:
+        errors = "; ".join([err["msg"] for err in e.errors()])
+        return JSONResponse({"success": False, "error": f"数据错误: {errors}"}, status_code=400)
+
+    try:
+        period = create_hydro_comparison_period(db, well_id, data)
+    except ValueError as e:
+        return JSONResponse({"success": False, "error": str(e)}, status_code=400)
+
+    return JSONResponse({"success": True, "period_id": period.id, "redirect": "/hydro-environment"})
+
+
+@app.get("/api/hydro-comparisons/{period_id}")
+async def get_hydro_comparison_api(period_id: int, db: Session = Depends(get_db)):
+    import json
+    period = get_hydro_comparison_period(db, period_id)
+    if not period:
+        raise HTTPException(status_code=404, detail="对比周期不存在")
+    
+    experiment_ids = []
+    if period.experiment_ids_json:
+        try:
+            experiment_ids = json.loads(period.experiment_ids_json)
+        except Exception:
+            experiment_ids = []
+    
+    items = []
+    season_data = {}
+    
+    for exp_id in experiment_ids:
+        exp = get_hydro_experiment(db, exp_id)
+        if not exp:
+            continue
+        
+        analysis = exp.analysis_result
+        analysis_dict = None
+        if analysis:
+            anomaly_list = json.loads(analysis.anomaly_warnings_json) if analysis.anomaly_warnings_json else []
+            analysis_dict = {
+                "env_sensitivity_coefficient": analysis.env_sensitivity_coefficient,
+                "avg_flow_rate_lpm": analysis.avg_flow_rate_lpm,
+                "peak_flow_rate_lpm": analysis.peak_flow_rate_lpm,
+                "avg_stability_index": analysis.avg_stability_index,
+                "avg_labor_burden": analysis.avg_labor_burden,
+                "water_level_change_pct": analysis.water_level_change_pct,
+                "temp_efficiency_corr": analysis.temp_efficiency_corr,
+                "level_efficiency_corr": analysis.level_efficiency_corr,
+                "quality_efficiency_corr": analysis.quality_efficiency_corr,
+                "overall_score": analysis.overall_score,
+                "avg_flow_rate": analysis.avg_flow_rate_lpm,
+                "peak_flow": analysis.peak_flow_rate_lpm,
+                "env_sensitivity": analysis.env_sensitivity_coefficient,
+                "stability_index": analysis.avg_stability_index,
+                "labor_burden": analysis.avg_labor_burden,
+                "anomaly_list": anomaly_list,
+            }
+        
+        dps = []
+        for dp in exp.data_points:
+            dps.append({
+                "point_index": dp.point_index,
+                "elapsed_min": dp.elapsed_min,
+                "water_level_m": dp.water_level_m,
+                "water_temp_c": dp.water_temp_c,
+                "flow_rate_lpm": dp.flow_rate_lpm,
+                "draw_efficiency_pct": dp.draw_efficiency_pct,
+                "labor_burden_score": dp.labor_burden_score,
+                "stability_index": dp.stability_index,
+            })
+        
+        exp_info = {
+            "id": exp.id,
+            "experiment_name": exp.experiment_name,
+            "season": exp.season,
+            "weather": exp.weather,
+            "underground_water_level_m": exp.underground_water_level_m,
+            "well_water_temp_c": exp.well_water_temp_c,
+            "water_quality": exp.water_quality,
+            "draw_frequency": exp.draw_frequency,
+        }
+        
+        items.append({
+            "experiment_id": exp.id,
+            "experiment": exp_info,
+            "data_points": dps,
+            "analysis_result": analysis_dict,
+        })
+        
+        season = exp.season
+        if season not in season_data:
+            season_data[season] = {
+                "experiments": [],
+                "avg_flow_rates": [],
+                "avg_water_levels": [],
+                "avg_water_temps": [],
+                "env_sensitivities": [],
+                "overall_scores": [],
+            }
+        season_data[season]["experiments"].append(exp.experiment_name)
+        if analysis:
+            season_data[season]["avg_flow_rates"].append(analysis.avg_flow_rate_lpm)
+            season_data[season]["env_sensitivities"].append(analysis.env_sensitivity_coefficient)
+            season_data[season]["overall_scores"].append(analysis.overall_score)
+        season_data[season]["avg_water_levels"].append(exp.underground_water_level_m)
+        season_data[season]["avg_water_temps"].append(exp.well_water_temp_c)
+    
+    season_comparison = {}
+    for season, data in season_data.items():
+        avg_flow = sum(data["avg_flow_rates"]) / len(data["avg_flow_rates"]) if data["avg_flow_rates"] else 0
+        avg_level = sum(data["avg_water_levels"]) / len(data["avg_water_levels"]) if data["avg_water_levels"] else 0
+        avg_temp = sum(data["avg_water_temps"]) / len(data["avg_water_temps"]) if data["avg_water_temps"] else 0
+        avg_sens = sum(data["env_sensitivities"]) / len(data["env_sensitivities"]) if data["env_sensitivities"] else 0
+        avg_score = sum(data["overall_scores"]) / len(data["overall_scores"]) if data["overall_scores"] else 0
+        season_comparison[season] = {
+            "experiment_count": len(data["experiments"]),
+            "experiment_names": data["experiments"],
+            "avg_flow_rate": round(avg_flow, 2),
+            "avg_water_level": round(avg_level, 2),
+            "avg_water_temp": round(avg_temp, 2),
+            "env_sensitivity": round(avg_sens, 4),
+            "overall_score": round(avg_score, 2),
+        }
+    
+    stored_result = {}
+    if period.comparison_result_json:
+        try:
+            stored_result = json.loads(period.comparison_result_json)
+        except Exception:
+            stored_result = {}
+    
+    result = {
+        "success": True,
+        "period_id": period.id,
+        "period_name": period.period_name,
+        "description": period.description,
+        "items": items,
+        "season_comparison": season_comparison,
+        "best_overall": stored_result.get("best_overall"),
+        "best_flow": stored_result.get("best_flow"),
+        "best_stability": stored_result.get("best_stability"),
+        "recommendations": stored_result.get("recommendations", []),
+    }
+    return JSONResponse(result)
+
+
+@app.post("/hydro-comparisons/{period_id}/delete")
+async def delete_hydro_comparison_endpoint(period_id: int, db: Session = Depends(get_db)):
+    if not delete_hydro_comparison_period(db, period_id):
+        raise HTTPException(status_code=404, detail="对比周期不存在")
+    return RedirectResponse(url="/hydro-environment", status_code=303)
+
+
+@app.post("/api/wells/{well_id}/hydro-reports")
+async def create_hydro_report_api(
+    well_id: int,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    well = get_well(db, well_id)
+    if not well:
+        return JSONResponse({"success": False, "error": "古井档案不存在"}, status_code=404)
+
+    try:
+        body = await request.json()
+        data = HydroResearchReportCreate(**body)
+    except ValidationError as e:
+        errors = "; ".join([err["msg"] for err in e.errors()])
+        return JSONResponse({"success": False, "error": f"数据错误: {errors}"}, status_code=400)
+    except Exception:
+        return JSONResponse({"success": False, "error": "请求数据格式错误"}, status_code=400)
+
+    try:
+        report = create_hydro_research_report(db, well_id, data)
+        return JSONResponse({"success": True, "report_id": report.id, "redirect": "/hydro-environment"})
+    except ValueError as e:
+        return JSONResponse({"success": False, "error": str(e)}, status_code=400)
+
+
+@app.get("/api/hydro-reports/{report_id}")
+async def get_hydro_report_api(report_id: int, db: Session = Depends(get_db)):
+    import json
+    report = get_hydro_research_report(db, report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="研究报告不存在")
+    key_findings = []
+    if report.key_findings_json:
+        try:
+            key_findings = json.loads(report.key_findings_json)
+        except Exception:
+            pass
+    return JSONResponse({
+        "success": True,
+        "id": report.id,
+        "well_id": report.well_id,
+        "title": report.title,
+        "author": report.author,
+        "summary": report.summary,
+        "conclusions": report.conclusions,
+        "report_content": report.report_content,
+        "experiment_count": report.experiment_count,
+        "period_count": report.period_count,
+        "key_findings": key_findings,
+        "recommendations": report.recommendations,
+        "created_at": report.created_at.strftime("%Y-%m-%d %H:%M:%S") if report.created_at else None
+    })
+
+
+@app.get("/api/wells/{well_id}/hydro-reports")
+async def get_well_hydro_reports_api(well_id: int, db: Session = Depends(get_db)):
+    well = get_well(db, well_id)
+    if not well:
+        raise HTTPException(status_code=404, detail="古井档案不存在")
+    reports = get_hydro_research_reports(db, well_id=well_id)
+    result = []
+    for r in reports:
+        result.append({
+            "id": r.id,
+            "title": r.title,
+            "author": r.author,
+            "experiment_count": r.experiment_count,
+            "period_count": r.period_count,
+            "created_at": r.created_at.strftime("%Y-%m-%d %H:%M:%S") if r.created_at else None
+        })
+    return JSONResponse({"reports": result})
+
+
+@app.post("/api/hydro-reports/{report_id}/delete")
+async def delete_hydro_report_api(report_id: int, db: Session = Depends(get_db)):
+    if not delete_hydro_research_report(db, report_id):
+        raise HTTPException(status_code=404, detail="研究报告不存在")
+    return JSONResponse({"success": True})

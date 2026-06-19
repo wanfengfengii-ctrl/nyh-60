@@ -584,3 +584,71 @@ class OptimizationReportResponse(OptimizationReportBase):
 
     class Config:
         from_attributes = True
+
+
+class HydroDataPointBase(BaseModel):
+    point_index: int = Field(..., ge=0)
+    elapsed_min: float = Field(..., ge=0, description="累计时间必须大于等于0分钟")
+    water_level_m: Optional[float] = Field(0.0, ge=0, description="地下水位(m)")
+    water_temp_c: Optional[float] = Field(15.0, ge=-10, le=50, description="井水温度(-10~50°C)")
+    flow_rate_lpm: Optional[float] = Field(0.0, ge=0, description="瞬时出水量(L/min)")
+    draw_efficiency_pct: Optional[float] = Field(100.0, ge=0, le=200, description="汲水效率(%)")
+    labor_burden_score: Optional[float] = Field(0.0, ge=0, le=10, description="人工负荷评分(0~10)")
+    stability_index: Optional[float] = Field(1.0, ge=0, le=2, description="出水稳定性指数")
+
+
+class HydroDataPointCreate(HydroDataPointBase):
+    pass
+
+
+class HydroExperimentBase(BaseModel):
+    experiment_name: str = Field(..., min_length=1, max_length=200)
+    season: Optional[str] = Field("春季", pattern="^(春季|夏季|秋季|冬季)$")
+    weather: Optional[str] = Field("晴天", max_length=50)
+    underground_water_level_m: Optional[float] = Field(0.0, ge=0, description="地下水位(m)")
+    well_water_temp_c: Optional[float] = Field(15.0, ge=-10, le=50, description="井水温度(-10~50°C)")
+    water_quality: Optional[str] = Field("清澈", pattern="^(清澈|微浊|浑浊|异味|干涸)$")
+    draw_frequency: Optional[int] = Field(1, ge=1, description="取水频率(次/日)")
+    observation_date: Optional[str] = Field("", max_length=20)
+    notes: Optional[str] = Field("", max_length=5000)
+
+
+class HydroExperimentCreate(HydroExperimentBase):
+    config_id: Optional[int] = None
+    data_points: List[HydroDataPointCreate]
+
+    @field_validator("data_points")
+    @classmethod
+    def validate_data_points(cls, v):
+        if len(v) < 2:
+            raise ValueError("至少需要2个数据点用于分析")
+        elapsed = [dp.elapsed_min for dp in v]
+        for i in range(1, len(elapsed)):
+            if elapsed[i] <= elapsed[i - 1]:
+                raise ValueError(f"时间点必须严格递增：第{i+1}个({elapsed[i]}min)不大于第{i}个({elapsed[i-1]}min)")
+        return v
+
+
+class HydroExperimentUpdate(BaseModel):
+    experiment_name: Optional[str] = Field(None, min_length=1, max_length=200)
+    season: Optional[str] = Field(None, pattern="^(春季|夏季|秋季|冬季)$")
+    weather: Optional[str] = Field(None, max_length=50)
+    underground_water_level_m: Optional[float] = Field(None, ge=0)
+    well_water_temp_c: Optional[float] = Field(None, ge=-10, le=50)
+    water_quality: Optional[str] = Field(None, pattern="^(清澈|微浊|浑浊|异味|干涸)$")
+    draw_frequency: Optional[int] = Field(None, ge=1)
+    observation_date: Optional[str] = Field(None, max_length=20)
+    notes: Optional[str] = Field(None, max_length=5000)
+
+
+class HydroComparisonPeriodCreate(BaseModel):
+    period_name: str = Field(..., min_length=1, max_length=200)
+    description: Optional[str] = Field("", max_length=2000)
+    experiment_ids: List[int] = Field(..., min_length=2, description="至少选择2个实验进行对比")
+
+
+class HydroResearchReportCreate(BaseModel):
+    title: str = Field(..., min_length=1, max_length=200)
+    author: Optional[str] = Field("", max_length=100)
+    summary: Optional[str] = ""
+    conclusions: Optional[str] = ""

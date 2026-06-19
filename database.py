@@ -30,7 +30,9 @@ def init_db():
         LaborExperiment, LaborTimePoint, LaborAnalysisResult,
         LaborComparisonGroup, LaborComparisonItem,
         SceneConfig, LaborScheme, SceneSimulation, SimulationTimePoint,
-        OptimizationReport, OptimizationReportItem
+        OptimizationReport, OptimizationReportItem,
+        HydroExperiment, HydroExperimentDataPoint, HydroAnalysisResult,
+        HydroComparisonPeriod, HydroResearchReport
     )
     Base.metadata.create_all(bind=engine)
 

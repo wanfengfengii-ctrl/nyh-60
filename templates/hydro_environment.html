@@ -1,0 +1,1363 @@
+{% extends "base.html" %}
+
+{% block title %}水文环境与季节波动研究 - 古井汲水效率复原平台{% endblock %}
+
+{% block content %}
+<div class="page-header" style="padding:24px 32px; background:linear-gradient(135deg, #1E4D8C 0%, #2E7D8A 100%); color:#FFFBF5;">
+    <h1 style="margin:0 0 8px 0; font-family:'Noto Serif SC'; font-size:28px;">🌊 水文环境与季节波动研究</h1>
+    <p style="margin:0; opacity:0.9; font-size:14px;">研究地下水位、水温、水质等环境因素对汲水效率的影响；分析季节性波动规律与环境敏感性</p>
+</div>
+
+<div style="padding:24px 32px;">
+    <div class="tabs" style="margin-bottom:24px;">
+        <button class="tab-btn active" data-tab="tab-create">📝 新建实验记录</button>
+        <button class="tab-btn" data-tab="tab-list">📋 实验记录列表</button>
+        <button class="tab-btn" data-tab="tab-charts">📊 可视化分析</button>
+        <button class="tab-btn" data-tab="tab-compare">🔬 多时间周期对比</button>
+        <button class="tab-btn" data-tab="tab-reports">📄 研究报告</button>
+    </div>
+
+    <div id="tab-create" class="tab-content active">
+        <div class="panel">
+            <div class="panel-header">
+                <h3>水文环境实验数据录入</h3>
+            </div>
+            <form id="hydro-exp-form">
+                <div class="form-row two-col">
+                    <label class="form-group">
+                        <span class="form-label">选择古井 <em>*</em></span>
+                        <select id="f-well" required onchange="loadHydroConfigsForWell()">
+                            <option value="">-- 请选择古井 --</option>
+                            {% for w in wells %}
+                            <option value="{{ w.id }}">{{ w.name }}{% if w.location %}（{{ w.location }}）{% endif %}</option>
+                            {% endfor %}
+                        </select>
+                    </label>
+                    <label class="form-group">
+                        <span class="form-label">参数配置（可选）</span>
+                        <select id="f-config">
+                            <option value="">不关联结构参数</option>
+                        </select>
+                    </label>
+                </div>
+
+                <div class="form-row two-col">
+                    <label class="form-group">
+                        <span class="form-label">实验名称 <em>*</em></span>
+                        <input type="text" id="f-name" maxlength="200" required placeholder="如：春季-晴天-连续监测30min">
+                    </label>
+                    <label class="form-group">
+                        <span class="form-label">季节 <em>*</em></span>
+                        <select id="f-season" required>
+                            <option value="春季">春季</option>
+                            <option value="夏季">夏季</option>
+                            <option value="秋季">秋季</option>
+                            <option value="冬季">冬季</option>
+                        </select>
+                    </label>
+                </div>
+
+                <div class="form-row two-col">
+                    <label class="form-group">
+                        <span class="form-label">天气状况</span>
+                        <input type="text" id="f-weather" value="晴天" maxlength="50" placeholder="如：晴天、阴天、雨天等">
+                    </label>
+                    <label class="form-group">
+                        <span class="form-label">地下水位（米）</span>
+                        <input type="number" id="f-water-level" step="0.1" value="0" placeholder="距地面深度">
+                    </label>
+                </div>
+
+                <div class="form-row two-col">
+                    <label class="form-group">
+                        <span class="form-label">井水温度（℃）</span>
+                        <input type="number" id="f-water-temp" step="0.5" value="15" placeholder="实测水温">
+                    </label>
+                    <label class="form-group">
+                        <span class="form-label">水质状态</span>
+                        <select id="f-water-quality">
+                            <option value="清澈">清澈</option>
+                            <option value="微浊">微浊</option>
+                            <option value="浑浊">浑浊</option>
+                            <option value="异味">异味</option>
+                            <option value="干涸">干涸</option>
+                        </select>
+                    </label>
+                </div>
+
+                <div class="form-row two-col">
+                    <label class="form-group">
+                        <span class="form-label">汲水频率（次/周期）</span>
+                        <input type="number" id="f-draw-freq" min="1" value="1">
+                    </label>
+                    <label class="form-group">
+                        <span class="form-label">观测日期</span>
+                        <input type="text" id="f-obs-date" maxlength="10" placeholder="YYYY-MM-DD">
+                    </label>
+                </div>
+
+                <div class="form-row">
+                    <label class="form-group">
+                        <span class="form-label">实验备注</span>
+                        <textarea id="f-notes" rows="2" maxlength="5000" placeholder="记录环境因素、特殊状况、设备状态等..."></textarea>
+                    </label>
+                </div>
+
+                <div class="form-row" style="margin-top:16px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                        <label class="form-group full-width" style="margin:0;">
+                            <span class="form-label">数据点（至少2个，时间必须递增） <em>*</em></span>
+                        </label>
+                        <button type="button" class="btn-secondary" onclick="generateHydroSampleData()" style="white-space:nowrap;">📐 填充示例数据</button>
+                    </div>
+                    <div id="hydro-dp-container" style="border:1px solid #E8DFD0; border-radius:8px; padding:16px; background:#FFFBF5;"></div>
+                    <div style="margin-top:12px;">
+                        <button type="button" class="btn-secondary" onclick="addHydroDataPoint()">+ 添加数据点</button>
+                    </div>
+                </div>
+
+                <div id="hydro-form-error" class="error-msg hidden" style="margin-top:16px;"></div>
+
+                <div class="form-actions" style="margin-top:24px;">
+                    <button type="submit" class="btn-primary" id="submit-hydro-btn">💾 提交并计算分析</button>
+                    <button type="reset" class="btn-secondary" onclick="resetHydroForm()">重置</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="tab-list" class="tab-content">
+        <div class="panel">
+            <div class="panel-header">
+                <h3>水文环境实验记录</h3>
+                <div style="display:flex; gap:8px;">
+                    <select id="filter-well" onchange="filterHydroExperiments()" style="padding:6px 10px; border-radius:6px; border:1px solid #ccc;">
+                        <option value="">全部古井</option>
+                        {% for w in wells %}
+                        <option value="{{ w.id }}">{{ w.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+            <div id="hydro-exp-list" class="table-wrapper">
+                {% if hydro_experiments %}
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>实验名称</th>
+                            <th>古井</th>
+                            <th>季节</th>
+                            <th>天气</th>
+                            <th>水位(m)</th>
+                            <th>水温(℃)</th>
+                            <th>水质</th>
+                            <th>汲水频率</th>
+                            <th>综合评分</th>
+                            <th>异常</th>
+                            <th>创建时间</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for exp in hydro_experiments %}
+                        <tr id="hydro-row-{{ exp.id }}">
+                            <td><strong>{{ exp.experiment_name }}</strong></td>
+                            <td class="text-center">
+                                {% for w in wells %}
+                                {% if w.id == exp.well_id %}{{ w.name }}{% endif %}
+                                {% endfor %}
+                            </td>
+                            <td class="text-center"><span class="status-tag valid">{{ exp.season }}</span></td>
+                            <td class="text-center">{{ exp.weather }}</td>
+                            <td class="text-center">{{ exp.underground_water_level_m }}</td>
+                            <td class="text-center">{{ exp.well_water_temp_c }}</td>
+                            <td class="text-center">
+                                {% set qcolor = {'清澈':'#388e3c','微浊':'#f57c00','浑浊':'#d32f2f','异味':'#d32f2f','干涸':'#666'} %}
+                                <span style="color:{{ qcolor.get(exp.water_quality, '#666') }}; font-weight:600;">{{ exp.water_quality }}</span>
+                            </td>
+                            <td class="text-center">{{ exp.draw_frequency }}</td>
+                            <td class="text-center highlight">
+                                {% if exp.analysis_result and exp.analysis_result.overall_score is defined %}
+                                <span style="color:{% if exp.analysis_result.overall_score >= 0.7 %}#388e3c{% elif exp.analysis_result.overall_score >= 0.4 %}#f57c00{% else %}#d32f2f{% endif %};">
+                                    {{ (exp.analysis_result.overall_score * 100)|round(1) }}分
+                                </span>
+                                {% else %}-{% endif %}
+                            </td>
+                            <td class="text-center">
+                                {% if exp.analysis_result and exp.analysis_result.anomaly_flags %}
+                                <span class="status-tag abnormal">⚠ {{ exp.analysis_result.anomaly_flags|length }}</span>
+                                {% else %}
+                                <span class="status-tag valid">正常</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-center muted"><small>{{ exp.created_at.strftime('%Y-%m-%d %H:%M') }}</small></td>
+                            <td class="text-center">
+                                <button class="btn-link" onclick="viewHydroExperiment({{ exp.id }})">查看分析</button>
+                                <button class="btn-link" onclick="editHydroExperiment({{ exp.id }})">编辑</button>
+                                <form action="/hydro-experiments/{{ exp.id }}/delete" method="post" style="display:inline;" onsubmit="return confirm('确定删除此实验记录？');">
+                                    <button type="submit" class="btn-link-danger" style="padding:4px 8px;">删除</button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <div class="empty-state">
+                    <p class="empty-text">暂无水文环境实验记录，请先录入实验数据。</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div id="tab-charts" class="tab-content">
+        <div class="panel">
+            <div class="panel-header">
+                <h3>水文环境可视化分析</h3>
+                <div style="display:flex; gap:8px; align-items:center;">
+                    <label style="font-size:13px; color:#888;">选择古井:</label>
+                    <select id="chart-well" onchange="loadHydroChartsData()" style="padding:6px 10px; border-radius:6px; border:1px solid #ccc;">
+                        <option value="">全部</option>
+                        {% for w in wells %}
+                        <option value="{{ w.id }}">{{ w.name }}</option>
+                        {% endfor %}
+                    </select>
+                    <label style="font-size:13px; color:#888;">实验:</label>
+                    <select id="chart-exp" onchange="renderHydroCharts()" style="padding:6px 10px; border-radius:6px; border:1px solid #ccc;">
+                        <option value="">请先选择古井</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="stats-grid" id="hydro-stats" style="margin-bottom:24px;">
+                <div class="stat-card"><span class="stat-label">平均流量</span><span class="stat-value" id="s-avg-flow">0.00</span><span class="stat-unit">L/min</span></div>
+                <div class="stat-card"><span class="stat-label">峰值流量</span><span class="stat-value" id="s-peak-flow">0.00</span><span class="stat-unit">L/min</span></div>
+                <div class="stat-card primary"><span class="stat-label">环境敏感度</span><span class="stat-value" id="s-env-sens">0.00</span><span class="stat-unit">指数</span></div>
+                <div class="stat-card"><span class="stat-label">稳定性指数</span><span class="stat-value" id="s-stability">0.00</span><span class="stat-unit">CV%</span></div>
+                <div class="stat-card"><span class="stat-label">劳作负荷</span><span class="stat-value" id="s-labor-burden">0.00</span><span class="stat-unit">分</span></div>
+                <div class="stat-card"><span class="stat-label">综合评分</span><span class="stat-value" id="s-overall">0.00</span><span class="stat-unit">分</span></div>
+            </div>
+
+            <div id="hydro-charts-empty" class="empty-state small">
+                <p class="empty-text">请选择实验以查看分析图表。</p>
+            </div>
+            <div id="hydro-charts-container" style="display:none;">
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:24px; margin-bottom:24px;">
+                    <div class="panel" style="margin:0;">
+                        <div class="panel-header"><h3>📈 季节效率波动曲线</h3></div>
+                        <div id="season-efficiency-chart" class="chart-container" style="height:380px;"></div>
+                    </div>
+                    <div class="panel" style="margin:0;">
+                        <div class="panel-header"><h3>💧 水位变化趋势</h3></div>
+                        <div id="water-level-chart" class="chart-container" style="height:380px;"></div>
+                    </div>
+                </div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:24px; margin-bottom:24px;">
+                    <div class="panel" style="margin:0;">
+                        <div class="panel-header"><h3>🌡️ 环境敏感性分析</h3></div>
+                        <div id="env-sensitivity-chart" class="chart-container" style="height:380px;"></div>
+                    </div>
+                    <div class="panel" style="margin:0;">
+                        <div class="panel-header"><h3>📊 高低效时段分布</h3></div>
+                        <div id="efficiency-dist-chart" class="chart-container" style="height:380px;"></div>
+                    </div>
+                </div>
+                <div class="panel" style="margin-bottom:24px;">
+                    <div class="panel-header"><h3>⚠️ 异常预警</h3></div>
+                    <div id="hydro-anomaly-list"></div>
+                </div>
+                <div class="panel">
+                    <div class="panel-header"><h3>📝 研究结论自动生成</h3></div>
+                    <div id="hydro-research-conclusion" class="form-panel" style="background:#FFFBF5; line-height:1.8;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="tab-compare" class="tab-content">
+        <div class="panel">
+            <div class="panel-header">
+                <h3>多时间周期对比研究</h3>
+            </div>
+
+            <div class="form-panel compact" style="margin-bottom:24px;">
+                <h4 style="margin:0 0 16px 0;">🔬 创建对比组</h4>
+                <div class="form-row two-col">
+                    <label class="form-group">
+                        <span class="form-label">选择古井 <em>*</em></span>
+                        <select id="cmp-well" required onchange="loadHydroAvailableExperiments()">
+                            <option value="">-- 请选择古井 --</option>
+                            {% for w in wells %}
+                            <option value="{{ w.id }}">{{ w.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </label>
+                    <label class="form-group">
+                        <span class="form-label">周期名称 <em>*</em></span>
+                        <input type="text" id="cmp-period-name" maxlength="200" placeholder="如：春秋两季水位对比">
+                    </label>
+                </div>
+                <div class="form-row">
+                    <label class="form-group">
+                        <span class="form-label">对比说明</span>
+                        <textarea id="cmp-desc" rows="2" maxlength="2000" placeholder="说明对比的时间范围、研究目的等..."></textarea>
+                    </label>
+                </div>
+                <div class="form-row">
+                    <label class="form-group full-width">
+                        <span class="form-label">选择对比实验（至少2个） <em>*</em></span>
+                        <div id="hydro-available-exps" style="border:1px solid #E8DFD0; border-radius:8px; padding:12px; max-height:200px; overflow-y:auto; background:#FFFBF5;">
+                            <p class="muted" style="margin:0; font-size:13px;">请先选择古井以加载可用实验</p>
+                        </div>
+                    </label>
+                </div>
+                <div id="cmp-error" class="error-msg hidden"></div>
+                <div class="form-actions" style="margin-top:12px;">
+                    <button type="button" class="btn-primary" onclick="createHydroComparison()">✅ 创建对比组并分析</button>
+                </div>
+            </div>
+
+            <div id="hydro-comparison-result" style="display:none;"></div>
+
+            <div id="hydro-comparison-list" style="margin-top:32px;">
+                <h4 style="margin:0 0 16px 0;">📁 历史对比组</h4>
+                {% if comparison_periods %}
+                <div class="table-wrapper">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>周期名称</th>
+                                <th>古井</th>
+                                <th>实验数量</th>
+                                <th>说明</th>
+                                <th>创建时间</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for p in comparison_periods %}
+                            <tr>
+                                <td><strong>{{ p.period_name }}</strong></td>
+                                <td class="text-center">
+                                    {% for w in wells %}
+                                    {% if w.id == p.well_id %}{{ w.name }}{% endif %}
+                                    {% endfor %}
+                                </td>
+                                <td class="text-center">{{ p.items|length }}</td>
+                                <td class="muted" style="max-width:300px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ p.description or '-' }}</td>
+                                <td class="text-center muted"><small>{{ p.created_at.strftime('%Y-%m-%d %H:%M') }}</small></td>
+                                <td class="text-center">
+                                    <button class="btn-link" onclick="viewHydroComparison({{ p.id }})">查看分析</button>
+                                    <form action="/hydro-comparisons/{{ p.id }}/delete" method="post" style="display:inline;" onsubmit="return confirm('确定删除此对比组？');">
+                                        <button type="submit" class="btn-link-danger" style="padding:4px 8px;">删除</button>
+                                    </form>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="empty-state small">
+                    <p class="empty-text">暂无历史对比组。</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div id="tab-reports" class="tab-content">
+        <div class="panel">
+            <div class="panel-header">
+                <h3>水文环境研究报告</h3>
+            </div>
+
+            <div class="form-panel compact" style="margin-bottom:24px;">
+                <h4 style="margin:0 0 16px 0;">📝 创建研究报告</h4>
+                <div class="form-row two-col">
+                    <label class="form-group">
+                        <span class="form-label">选择古井 <em>*</em></span>
+                        <select id="rpt-well" required>
+                            <option value="">-- 请选择古井 --</option>
+                            {% for w in wells %}
+                            <option value="{{ w.id }}">{{ w.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </label>
+                    <label class="form-group">
+                        <span class="form-label">报告标题 <em>*</em></span>
+                        <input type="text" id="rpt-title" maxlength="200" placeholder="如：古井水文环境季度研究报告">
+                    </label>
+                </div>
+                <div class="form-row two-col">
+                    <label class="form-group">
+                        <span class="form-label">作者</span>
+                        <input type="text" id="rpt-author" maxlength="100" placeholder="研究负责人">
+                    </label>
+                    <label class="form-group"></label>
+                </div>
+                <div class="form-row">
+                    <label class="form-group">
+                        <span class="form-label">研究摘要</span>
+                        <textarea id="rpt-summary" rows="3" maxlength="5000" placeholder="概述研究背景、目的和方法..."></textarea>
+                    </label>
+                </div>
+                <div class="form-row">
+                    <label class="form-group">
+                        <span class="form-label">研究结论</span>
+                        <textarea id="rpt-conclusions" rows="3" maxlength="5000" placeholder="总结研究发现与建议..."></textarea>
+                    </label>
+                </div>
+                <div id="rpt-error" class="error-msg hidden"></div>
+                <div class="form-actions" style="margin-top:12px;">
+                    <button type="button" class="btn-primary" onclick="createHydroReport()">📄 创建报告</button>
+                </div>
+            </div>
+
+            <div id="hydro-reports-list">
+                <h4 style="margin:0 0 16px 0;">📚 已有研究报告</h4>
+                {% if hydro_reports %}
+                <div class="table-wrapper">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>报告标题</th>
+                                <th>古井</th>
+                                <th>作者</th>
+                                <th>摘要</th>
+                                <th>创建时间</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for rpt in hydro_reports %}
+                            <tr>
+                                <td><strong>{{ rpt.title }}</strong></td>
+                                <td class="text-center">
+                                    {% for w in wells %}
+                                    {% if w.id == rpt.well_id %}{{ w.name }}{% endif %}
+                                    {% endfor %}
+                                </td>
+                                <td class="text-center">{{ rpt.author or '-' }}</td>
+                                <td class="muted" style="max-width:300px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ rpt.summary or '-' }}</td>
+                                <td class="text-center muted"><small>{{ rpt.created_at.strftime('%Y-%m-%d %H:%M') }}</small></td>
+                                <td class="text-center">
+                                    <button class="btn-link" onclick="viewHydroReport({{ rpt.id }})">查看</button>
+                                    <form action="/api/hydro-reports/{{ rpt.id }}/delete" method="post" style="display:inline;" onsubmit="return confirm('确定删除此报告？');">
+                                        <button type="submit" class="btn-link-danger" style="padding:4px 8px;">删除</button>
+                                    </form>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="empty-state small">
+                    <p class="empty-text">暂无研究报告，请先创建。</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal-overlay" id="hydro-edit-modal">
+    <div class="modal" style="max-width:800px;">
+        <div class="modal-header">
+            <h3>编辑水文实验数据</h3>
+            <button class="btn-close" onclick="closeModal('hydro-edit-modal')">×</button>
+        </div>
+        <div id="hydro-edit-content"></div>
+    </div>
+</div>
+
+<div class="modal-overlay" id="hydro-view-modal">
+    <div class="modal" style="max-width:1100px;">
+        <div class="modal-header">
+            <h3>实验分析详情</h3>
+            <button class="btn-close" onclick="closeModal('hydro-view-modal')">×</button>
+        </div>
+        <div id="hydro-view-content" style="padding:20px;"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            this.classList.add('active');
+            document.getElementById(this.dataset.tab).classList.add('active');
+            if (this.dataset.tab === 'tab-compare') loadHydroAvailableExperiments();
+        });
+    });
+    initHydroDataPoints();
+    document.getElementById('hydro-exp-form').addEventListener('submit', function(e) {
+        e.preventDefault();
+        submitHydroExperiment();
+    });
+});
+
+let hydroDpCount = 0;
+
+function initHydroDataPoints() {
+    const container = document.getElementById('hydro-dp-container');
+    container.innerHTML = '';
+    hydroDpCount = 0;
+    for (let i = 0; i < 3; i++) addHydroDataPoint(true);
+}
+
+function addHydroDataPoint(isInit) {
+    const container = document.getElementById('hydro-dp-container');
+    const idx = hydroDpCount++;
+    const row = document.createElement('div');
+    row.className = 'hydro-dp-row';
+    row.style.cssText = 'display:flex; gap:8px; align-items:center; padding:8px 0; border-bottom:1px dashed #E8DFD0; flex-wrap:wrap;';
+    row.innerHTML = `
+        <span style="width:28px; text-align:center; font-weight:600; color:#1E4D8C;">${idx + 1}</span>
+        <input type="number" step="0.5" min="0" class="hdp-elapsed" placeholder="时间(min)" style="flex:1; min-width:80px; padding:7px; border:1px solid #ccc; border-radius:6px;" ${isInit && idx < 2 ? 'required' : ''}>
+        <input type="number" step="0.01" min="0" class="hdp-water-level" placeholder="水位(m)" style="flex:1; min-width:80px; padding:7px; border:1px solid #ccc; border-radius:6px;">
+        <input type="number" step="0.1" class="hdp-water-temp" placeholder="水温(℃)" style="flex:1; min-width:80px; padding:7px; border:1px solid #ccc; border-radius:6px;">
+        <input type="number" step="0.1" min="0" class="hdp-flow-rate" placeholder="流量(L/min)" style="flex:1; min-width:80px; padding:7px; border:1px solid #ccc; border-radius:6px;">
+        <input type="number" step="0.1" min="0" max="100" class="hdp-draw-eff" placeholder="汲效(%)" style="flex:1; min-width:80px; padding:7px; border:1px solid #ccc; border-radius:6px;">
+        <input type="number" step="0.1" min="0" max="10" class="hdp-labor-burden" placeholder="负荷分" style="flex:1; min-width:80px; padding:7px; border:1px solid #ccc; border-radius:6px;">
+        <input type="number" step="0.01" min="0" max="1" class="hdp-stability" placeholder="稳定性" style="flex:1; min-width:80px; padding:7px; border:1px solid #ccc; border-radius:6px;">
+        <button type="button" class="btn-icon" onclick="this.parentElement.remove(); reindexHydroDp();" title="删除" ${hydroDpCount <= 3 ? 'disabled style="opacity:0.3; cursor:not-allowed;"' : ''}>✕</button>
+    `;
+    container.appendChild(row);
+    reindexHydroDp();
+}
+
+function reindexHydroDp() {
+    const rows = document.querySelectorAll('#hydro-dp-container .hydro-dp-row');
+    rows.forEach((row, i) => {
+        row.querySelector('span:first-child').textContent = i + 1;
+        const delBtn = row.querySelector('.btn-icon');
+        if (rows.length <= 2) {
+            delBtn.disabled = true; delBtn.style.opacity = '0.3'; delBtn.style.cursor = 'not-allowed';
+        } else {
+            delBtn.disabled = false; delBtn.style.opacity = '1'; delBtn.style.cursor = 'pointer';
+        }
+    });
+}
+
+function generateHydroSampleData() {
+    const season = document.getElementById('f-season').value;
+    const baseTemp = season === '春季' ? 14 : season === '夏季' ? 22 : season === '秋季' ? 16 : 8;
+    const baseLevel = season === '春季' ? 3.2 : season === '夏季' ? 4.5 : season === '秋季' ? 3.0 : 2.5;
+    const container = document.getElementById('hydro-dp-container');
+    container.innerHTML = '';
+    hydroDpCount = 0;
+    for (let i = 0; i < 6; i++) {
+        addHydroDataPoint(true);
+        const rows = container.querySelectorAll('.hydro-dp-row');
+        const row = rows[rows.length - 1];
+        const elapsed = (i * 5).toFixed(1);
+        const levelVar = baseLevel + (Math.random() - 0.5) * 0.3 - i * 0.05;
+        const tempVar = baseTemp + (Math.random() - 0.5) * 1.5;
+        const baseFlow = 12 - i * 0.4 + (Math.random() - 0.5) * 2;
+        const eff = Math.max(30, 85 - i * 5 + (Math.random() - 0.5) * 8);
+        const burden = Math.min(10, 3 + i * 0.6 + (Math.random() - 0.5) * 1);
+        const stab = Math.max(0, 0.9 - i * 0.05 - (Math.random() - 0.5) * 0.1);
+        row.querySelector('.hdp-elapsed').value = elapsed;
+        row.querySelector('.hdp-water-level').value = levelVar.toFixed(2);
+        row.querySelector('.hdp-water-temp').value = tempVar.toFixed(1);
+        row.querySelector('.hdp-flow-rate').value = baseFlow.toFixed(1);
+        row.querySelector('.hdp-draw-eff').value = eff.toFixed(1);
+        row.querySelector('.hdp-labor-burden').value = burden.toFixed(1);
+        row.querySelector('.hdp-stability').value = stab.toFixed(2);
+    }
+    showToast('已填充示例数据，可手动调整', 'success');
+}
+
+function loadHydroConfigsForWell() {
+    const wellId = document.getElementById('f-well').value;
+    const configSel = document.getElementById('f-config');
+    configSel.innerHTML = '<option value="">不关联结构参数</option>';
+    if (!wellId) return;
+    fetch(`/api/wells/${wellId}/configs`)
+        .then(r => r.json())
+        .then(data => {
+            (data.configs || []).forEach(c => {
+                const statusTag = c.status === 'active' ? ' [当前]' : '';
+                configSel.innerHTML += `<option value="${c.config_id}">v${c.version}${statusTag} 井深${c.well_depth_m}m/桶${c.bucket_capacity_l}L/轮${c.pulley_radius_m}m</option>`;
+            });
+        });
+}
+
+function resetHydroForm() {
+    initHydroDataPoints();
+    document.getElementById('hydro-form-error').classList.add('hidden');
+}
+
+function validateAndCollectHydroData() {
+    const wellId = parseInt(document.getElementById('f-well').value);
+    const configId = parseInt(document.getElementById('f-config').value) || null;
+    const name = document.getElementById('f-name').value.trim();
+    const season = document.getElementById('f-season').value;
+    const weather = document.getElementById('f-weather').value.trim();
+    const waterLevel = parseFloat(document.getElementById('f-water-level').value) || 0;
+    const waterTemp = parseFloat(document.getElementById('f-water-temp').value) || 15;
+    const waterQuality = document.getElementById('f-water-quality').value;
+    const drawFreq = parseInt(document.getElementById('f-draw-freq').value) || 1;
+    const obsDate = document.getElementById('f-obs-date').value.trim();
+    const notes = document.getElementById('f-notes').value.trim();
+    if (!wellId) return { error: '请选择古井' };
+    if (!name) return { error: '请输入实验名称' };
+    const rows = document.querySelectorAll('#hydro-dp-container .hydro-dp-row');
+    if (rows.length < 2) return { error: '至少需要2个数据点' };
+    const data_points = [];
+    let lastElapsed = -1;
+    for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        const elapsed = parseFloat(row.querySelector('.hdp-elapsed').value);
+        const wl = parseFloat(row.querySelector('.hdp-water-level').value) || 0;
+        const wt = parseFloat(row.querySelector('.hdp-water-temp').value) || 0;
+        const fr = parseFloat(row.querySelector('.hdp-flow-rate').value) || 0;
+        const de = parseFloat(row.querySelector('.hdp-draw-eff').value) || 0;
+        const lb = parseFloat(row.querySelector('.hdp-labor-burden').value) || 0;
+        const si = parseFloat(row.querySelector('.hdp-stability').value) || 0;
+        if (isNaN(elapsed)) return { error: `第${i + 1}个数据点时间不能为空` };
+        if (elapsed <= lastElapsed) return { error: `第${i + 1}个数据点的时间必须大于前一个` };
+        lastElapsed = elapsed;
+        data_points.push({ point_index: i, elapsed_min: elapsed, water_level_m: wl, water_temp_c: wt, flow_rate_lpm: fr, draw_efficiency_pct: de, labor_burden_score: lb, stability_index: si });
+    }
+    return {
+        error: null,
+        payload: {
+            meta: { experiment_name: name, season: season, weather: weather, underground_water_level_m: waterLevel, well_water_temp_c: waterTemp, water_quality: waterQuality, draw_frequency: drawFreq, observation_date: obsDate, notes: notes, config_id: configId },
+            data_points: data_points
+        }
+    };
+}
+
+function submitHydroExperiment() {
+    const result = validateAndCollectHydroData();
+    const errDiv = document.getElementById('hydro-form-error');
+    if (result.error) {
+        errDiv.textContent = result.error; errDiv.classList.remove('hidden');
+        showToast(result.error, 'error'); return;
+    }
+    errDiv.classList.add('hidden');
+    const wellId = parseInt(document.getElementById('f-well').value);
+    const btn = document.getElementById('submit-hydro-btn');
+    btn.disabled = true; btn.textContent = '提交中...';
+    fetch(`/wells/${wellId}/hydro-experiments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(result.payload)
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            showToast('水文实验记录创建成功，分析已完成', 'success');
+            setTimeout(() => location.reload(), 800);
+        } else {
+            errDiv.textContent = data.error || '提交失败'; errDiv.classList.remove('hidden');
+            showToast(data.error || '提交失败', 'error');
+            btn.disabled = false; btn.textContent = '💾 提交并计算分析';
+        }
+    })
+    .catch(err => {
+        errDiv.textContent = '网络错误'; errDiv.classList.remove('hidden');
+        showToast('网络错误', 'error');
+        btn.disabled = false; btn.textContent = '💾 提交并计算分析';
+    });
+}
+
+function filterHydroExperiments() {
+    const wid = document.getElementById('filter-well').value;
+    document.querySelectorAll('#hydro-exp-list tbody tr').forEach(row => {
+        if (!wid) { row.style.display = ''; return; }
+        const cells = row.querySelectorAll('td');
+        if (cells.length >= 2) {
+            const wellCell = cells[1].textContent.trim();
+            const matchingWell = document.querySelector(`#filter-well option[value="${wid}"]`);
+            if (matchingWell && wellCell === matchingWell.textContent.trim()) row.style.display = '';
+            else row.style.display = 'none';
+        }
+    });
+}
+
+let _hydroExpCache = null;
+
+function loadHydroChartsData() {
+    const wid = document.getElementById('chart-well').value;
+    const expSel = document.getElementById('chart-exp');
+    expSel.innerHTML = '<option value="">-- 请选择实验 --</option>';
+    document.getElementById('hydro-charts-empty').style.display = '';
+    document.getElementById('hydro-charts-container').style.display = 'none';
+    if (!wid) return;
+    fetch(`/api/wells/${wid}/hydro-experiments`)
+        .then(r => r.json())
+        .then(data => {
+            _hydroExpCache = data.experiments;
+            data.experiments.forEach(exp => {
+                expSel.innerHTML += `<option value="${exp.id}">${exp.experiment_name} (${exp.season}/${exp.weather})</option>`;
+            });
+        });
+}
+
+function renderHydroCharts() {
+    const expId = document.getElementById('chart-exp').value;
+    if (!expId || !_hydroExpCache) return;
+    const exp = _hydroExpCache.find(e => e.id == expId);
+    if (!exp) return;
+    const analysis = exp.analysis_result || {};
+    const dps = exp.data_points || [];
+    const anomalies = exp.anomaly_list || [];
+
+    document.getElementById('s-avg-flow').textContent = analysis.avg_flow_rate ? analysis.avg_flow_rate.toFixed(2) : '0.00';
+    document.getElementById('s-peak-flow').textContent = analysis.peak_flow ? analysis.peak_flow.toFixed(2) : '0.00';
+    document.getElementById('s-env-sens').textContent = analysis.env_sensitivity !== undefined ? analysis.env_sensitivity.toFixed(2) : '0.00';
+    document.getElementById('s-stability').textContent = analysis.stability_index !== undefined ? analysis.stability_index.toFixed(2) : '0.00';
+    document.getElementById('s-labor-burden').textContent = analysis.labor_burden !== undefined ? analysis.labor_burden.toFixed(2) : '0.00';
+    document.getElementById('s-overall').textContent = analysis.overall_score !== undefined ? (analysis.overall_score * 100).toFixed(1) : '0.00';
+
+    document.getElementById('hydro-charts-empty').style.display = 'none';
+    document.getElementById('hydro-charts-container').style.display = 'block';
+
+    const C = { primary: '#1E4D8C', secondary: '#2E7D8A', accent: '#B8860B', danger: '#d32f2f', success: '#388e3c', water: '#1565C0', temp: '#E65100' };
+    const elapsedArr = dps.map(d => d.elapsed_min);
+    const flowArr = dps.map(d => d.flow_rate_lpm);
+    const effArr = dps.map(d => d.draw_efficiency_pct);
+
+    Plotly.newPlot('season-efficiency-chart', [{
+        x: elapsedArr, y: flowArr, mode: 'lines+markers', name: '流量 (L/min)',
+        line: { color: C.primary, width: 3 }, marker: { size: 7, color: C.primary },
+        fill: 'tozeroy', fillcolor: 'rgba(30, 77, 140, 0.12)'
+    }, {
+        x: elapsedArr, y: effArr, mode: 'lines+markers', name: '汲水效率 (%)',
+        line: { color: C.accent, width: 2, dash: 'dot' }, marker: { size: 6, color: C.accent }, yaxis: 'y2'
+    }], {
+        title: { text: `季节效率波动 — ${exp.experiment_name}`, font: { family: 'Noto Serif SC', size: 15, color: '#1E4D8C' } },
+        xaxis: { title: '时间 (min)', gridcolor: '#E8DFD0' },
+        yaxis: { title: '流量 (L/min)', gridcolor: '#E8DFD0', side: 'left' },
+        yaxis2: { title: '汲水效率 (%)', overlaying: 'y', side: 'right', showgrid: false, range: [0, 100] },
+        paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: '#FFFBF5',
+        legend: { orientation: 'h', y: -0.2 },
+        margin: { l: 60, r: 60, t: 60, b: 80 }, font: { family: 'Noto Sans SC' }
+    }, { responsive: true });
+
+    const levelArr = dps.map(d => d.water_level_m);
+    const tempArr = dps.map(d => d.water_temp_c);
+
+    Plotly.newPlot('water-level-chart', [{
+        x: elapsedArr, y: levelArr, type: 'scatter', mode: 'lines+markers', name: '水位 (m)',
+        line: { color: C.water, width: 3 }, marker: { size: 7, color: C.water },
+        fill: 'tozeroy', fillcolor: 'rgba(21, 101, 192, 0.10)', yaxis: 'y'
+    }, {
+        x: elapsedArr, y: tempArr, type: 'scatter', mode: 'lines+markers', name: '水温 (℃)',
+        line: { color: C.temp, width: 2, dash: 'dash' }, marker: { size: 6, color: C.temp }, yaxis: 'y2'
+    }], {
+        title: { text: '水位与水温变化趋势', font: { family: 'Noto Serif SC', size: 15, color: '#1E4D8C' } },
+        xaxis: { title: '时间 (min)', gridcolor: '#E8DFD0' },
+        yaxis: { title: '水位 (m)', gridcolor: '#E8DFD0', side: 'left' },
+        yaxis2: { title: '水温 (℃)', overlaying: 'y', side: 'right', showgrid: false },
+        paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: '#FFFBF5',
+        legend: { orientation: 'h', y: -0.2 },
+        margin: { l: 60, r: 60, t: 60, b: 80 }, font: { family: 'Noto Sans SC' }
+    }, { responsive: true });
+
+    const corrKeys = ['temp_efficiency_corr', 'level_efficiency_corr', 'quality_efficiency_corr'];
+    const corrLabels = ['温度-效率相关', '水位-效率相关', '水质-效率相关'];
+    const corrVals = corrKeys.map(k => analysis[k] !== undefined ? analysis[k] : 0);
+    const corrColors = corrVals.map(v => v >= 0.5 ? C.danger : v >= 0.3 ? C.accent : C.success);
+
+    Plotly.newPlot('env-sensitivity-chart', [{
+        type: 'bar', x: corrLabels, y: corrVals,
+        marker: { color: corrColors }, text: corrVals.map(v => v.toFixed(3)), textposition: 'auto'
+    }], {
+        title: { text: `环境敏感性分析 — 综合敏感度 ${analysis.env_sensitivity !== undefined ? analysis.env_sensitivity.toFixed(2) : '-'}`, font: { family: 'Noto Serif SC', size: 15, color: '#1E4D8C' } },
+        yaxis: { title: '相关系数', gridcolor: '#E8DFD0', range: [0, Math.max(1, ...corrVals.map(Math.abs)) * 1.2] },
+        paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: '#FFFBF5',
+        margin: { l: 60, r: 30, t: 60, b: 60 }, font: { family: 'Noto Sans SC' }, showlegend: false
+    }, { responsive: true });
+
+    let highCount = 0, midCount = 0, lowCount = 0;
+    effArr.forEach(v => { if (v >= 70) highCount++; else if (v >= 40) midCount++; else lowCount++; });
+
+    Plotly.newPlot('efficiency-dist-chart', [{
+        type: 'bar', orientation: 'h',
+        y: ['低效时段 (<40%)', '中效时段 (40~70%)', '高效时段 (≥70%)'],
+        x: [lowCount, midCount, highCount],
+        marker: { color: [C.danger, C.accent, C.success] },
+        text: [`${lowCount}个`, `${midCount}个`, `${highCount}个`], textposition: 'auto'
+    }], {
+        title: { text: '高低效时段分布', font: { family: 'Noto Serif SC', size: 15, color: '#1E4D8C' } },
+        xaxis: { title: '数据点数', gridcolor: '#E8DFD0' },
+        paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: '#FFFBF5',
+        margin: { l: 140, r: 30, t: 60, b: 40 }, font: { family: 'Noto Sans SC' }, showlegend: false
+    }, { responsive: true });
+
+    const anomalyDiv = document.getElementById('hydro-anomaly-list');
+    if (anomalies.length === 0) {
+        anomalyDiv.innerHTML = `<div style="padding:16px; background:rgba(56,142,60,0.08); color:${C.success}; border-radius:6px; font-size:14px;">✅ 未检测到显著异常，水文环境数据质量良好</div>`;
+    } else {
+        let html = `<div style="padding:12px; background:rgba(211,47,47,0.08); color:${C.danger}; border-radius:6px; margin-bottom:12px; font-size:14px;">⚠️ 检测到 <strong>${anomalies.length}</strong> 处异常预警，建议人工复核</div>
+        <table class="data-table" style="font-size:13px;"><thead><tr><th>时间点</th><th>类型</th><th>指标值</th><th>偏离程度</th><th>说明</th></tr></thead><tbody>`;
+        anomalies.forEach(a => {
+            const typeColor = a.type === 'flow_spike' ? C.accent : a.type === 'flow_drop' ? C.danger : '#f57c00';
+            html += `<tr><td class="text-center">${a.elapsed_min} min</td><td class="text-center"><span style="color:${typeColor}; font-weight:600;">${a.type_label || a.type}</span></td><td class="text-center">${a.value || '-'}</td><td class="text-center">${a.z_score ? a.z_score + 'σ' : '-'}</td><td>${a.description}</td></tr>`;
+        });
+        html += '</tbody></table>';
+        anomalyDiv.innerHTML = html;
+    }
+
+    generateHydroConclusion(exp, analysis);
+}
+
+function generateHydroConclusion(exp, analysis) {
+    const el = document.getElementById('hydro-research-conclusion');
+    const avgFlow = analysis.avg_flow_rate || 0;
+    const envSens = analysis.env_sensitivity || 0;
+    const stability = analysis.stability_index || 0;
+    const laborBurden = analysis.labor_burden || 0;
+    const overall = analysis.overall_score || 0;
+    const season = exp.season || '-';
+
+    let rating = [];
+    if (avgFlow > 10) rating.push({ text: '平均流量优秀', color: '#388e3c' });
+    else if (avgFlow > 6) rating.push({ text: '平均流量良好', color: '#795548' });
+    else rating.push({ text: '平均流量偏低', color: '#d32f2f' });
+    if (envSens < 0.3) rating.push({ text: '环境敏感度低', color: '#388e3c' });
+    else if (envSens < 0.6) rating.push({ text: '环境敏感度中等', color: '#795548' });
+    else rating.push({ text: '环境敏感度高', color: '#d32f2f' });
+    if (stability < 15) rating.push({ text: '汲水稳定性极佳', color: '#388e3c' });
+    else if (stability < 30) rating.push({ text: '汲水稳定性一般', color: '#795548' });
+    else rating.push({ text: '汲水波动较大', color: '#d32f2f' });
+    if (laborBurden < 4) rating.push({ text: '劳作负荷较轻', color: '#388e3c' });
+    else if (laborBurden < 7) rating.push({ text: '劳作负荷中等', color: '#795548' });
+    else rating.push({ text: '劳作负荷较重', color: '#d32f2f' });
+
+    const ratingBadges = rating.map(r => `<span style="display:inline-block; padding:4px 12px; margin:4px 6px 4px 0; border-radius:20px; background:${r.color}15; color:${r.color}; font-weight:600; font-size:13px;">★ ${r.text}</span>`).join('');
+
+    let recommendations = [];
+    if (envSens > 0.5) recommendations.push('• 环境敏感度较高，建议在低敏感时段集中汲水');
+    if (stability > 25) recommendations.push('• 汲水稳定性波动较大，建议排查水位和温度影响因素');
+    if (laborBurden > 6) recommendations.push('• 劳作负荷偏高，建议优化汲水频率与休息节奏');
+    if (season === '冬季' && avgFlow < 8) recommendations.push('• 冬季流量偏低，建议减少单次汲水量、增加汲水频次');
+    if (season === '夏季' && envSens > 0.4) recommendations.push('• 夏季水位波动大，建议监测地下水位变化趋势');
+    if (recommendations.length === 0) recommendations.push('• 当前水文环境参数良好，建议持续监测');
+
+    const tempCorr = analysis.temp_efficiency_corr || 0;
+    const levelCorr = analysis.level_efficiency_corr || 0;
+    let corrNote = '';
+    if (Math.abs(tempCorr) > Math.abs(levelCorr)) {
+        corrNote = `温度与效率相关性(${tempCorr.toFixed(3)})强于水位(${levelCorr.toFixed(3)})，温度是主要环境影响因子`;
+    } else if (Math.abs(levelCorr) > 0.1) {
+        corrNote = `水位与效率相关性(${levelCorr.toFixed(3)})强于温度(${tempCorr.toFixed(3)})，水位变化是主要影响因素`;
+    } else {
+        corrNote = `温度(${tempCorr.toFixed(3)})和水位(${levelCorr.toFixed(3)})与效率关联均较弱，需考虑其他环境因素`;
+    }
+
+    el.innerHTML = `
+        <div style="margin-bottom:16px;">${ratingBadges}</div>
+        <div style="background:linear-gradient(135deg, #FFFBF5 0%, #E8F4FD 100%); padding:16px 20px; border-radius:8px; border-left:4px solid #1E4D8C; margin-bottom:16px;">
+            <strong style="font-size:16px; color:#1E4D8C;">📊 核心指标摘要</strong>
+            <div style="margin-top:12px; display:grid; grid-template-columns:repeat(auto-fit, minmax(180px,1fr)); gap:12px; font-size:14px;">
+                <div>🌊 季节：<strong>${season}</strong></div>
+                <div>🌤️ 天气：<strong>${exp.weather || '-'}</strong></div>
+                <div>💧 地下水位：<strong>${exp.underground_water_level_m || 0} m</strong></div>
+                <div>🌡️ 井水温度：<strong>${exp.well_water_temp_c || 0} ℃</strong></div>
+                <div>🔮 水质状态：<strong>${exp.water_quality || '-'}</strong></div>
+                <div>⚡ 平均流量：<strong>${avgFlow.toFixed(2)} L/min</strong></div>
+                <div>📈 峰值流量：<strong>${(analysis.peak_flow || 0).toFixed(2)} L/min</strong></div>
+                <div>🎯 环境敏感度：<strong style="color:#1E4D8C;">${envSens.toFixed(2)}</strong></div>
+                <div>📊 稳定性指数：<strong>${stability.toFixed(2)}%</strong></div>
+                <div>💪 劳作负荷：<strong>${laborBurden.toFixed(2)} 分</strong></div>
+                <div>🏆 综合评分：<strong style="color:#1E4D8C;">${(overall * 100).toFixed(1)} 分</strong></div>
+            </div>
+        </div>
+        <div style="margin-bottom:16px; font-size:14px; line-height:2;">
+            <strong style="color:#1E4D8C;">🔬 环境因子分析：</strong>${corrNote}
+        </div>
+        <div style="background:rgba(30,77,140,0.06); padding:16px 20px; border-radius:8px; font-size:14px; line-height:1.9;">
+            <strong style="color:#1E4D8C; font-size:15px;">💡 优化建议</strong>
+            <div style="margin-top:10px;">${recommendations.join('<br>')}</div>
+        </div>`;
+}
+
+function viewHydroExperiment(expId) {
+    const modal = document.getElementById('hydro-view-modal');
+    const content = document.getElementById('hydro-view-content');
+    modal.classList.add('show');
+    content.innerHTML = '<div class="empty-state small"><p class="empty-text">加载中...</p></div>';
+    fetch(`/api/hydro-experiments/${expId}`)
+        .then(r => r.json())
+        .then(exp => {
+            document.getElementById('chart-well').value = exp.well_id;
+            loadHydroChartsData();
+            setTimeout(() => {
+                document.getElementById('chart-exp').value = expId;
+                _hydroExpCache = [{ ...exp }];
+                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                document.querySelector('.tab-btn[data-tab="tab-charts"]').classList.add('active');
+                document.getElementById('tab-charts').classList.add('active');
+                renderHydroCharts();
+                closeModal('hydro-view-modal');
+            }, 300);
+        });
+}
+
+function editHydroExperiment(expId) {
+    const modal = document.getElementById('hydro-edit-modal');
+    const content = document.getElementById('hydro-edit-content');
+    modal.classList.add('show');
+    content.innerHTML = '<div class="empty-state small"><p class="empty-text">加载中...</p></div>';
+    fetch(`/api/hydro-experiments/${expId}`)
+        .then(r => r.json())
+        .then(exp => {
+            let dpsHtml = '';
+            exp.data_points.forEach((dp, i) => {
+                dpsHtml += `<div class="hydro-dp-row" style="display:flex; gap:8px; align-items:center; padding:6px 0; border-bottom:1px dashed #E8DFD0; flex-wrap:wrap;">
+                    <span style="width:28px; text-align:center; font-weight:600; color:#1E4D8C;">${i + 1}</span>
+                    <input type="number" step="0.5" min="0" class="edp-elapsed" value="${dp.elapsed_min}" style="flex:1; min-width:70px; padding:6px; border:1px solid #ccc; border-radius:6px;">
+                    <input type="number" step="0.01" class="edp-water-level" value="${dp.water_level_m}" style="flex:1; min-width:70px; padding:6px; border:1px solid #ccc; border-radius:6px;">
+                    <input type="number" step="0.1" class="edp-water-temp" value="${dp.water_temp_c}" style="flex:1; min-width:70px; padding:6px; border:1px solid #ccc; border-radius:6px;">
+                    <input type="number" step="0.1" min="0" class="edp-flow-rate" value="${dp.flow_rate_lpm}" style="flex:1; min-width:70px; padding:6px; border:1px solid #ccc; border-radius:6px;">
+                    <input type="number" step="0.1" min="0" max="100" class="edp-draw-eff" value="${dp.draw_efficiency_pct}" style="flex:1; min-width:70px; padding:6px; border:1px solid #ccc; border-radius:6px;">
+                    <input type="number" step="0.1" min="0" max="10" class="edp-labor-burden" value="${dp.labor_burden_score}" style="flex:1; min-width:70px; padding:6px; border:1px solid #ccc; border-radius:6px;">
+                    <input type="number" step="0.01" min="0" max="1" class="edp-stability" value="${dp.stability_index}" style="flex:1; min-width:70px; padding:6px; border:1px solid #ccc; border-radius:6px;">
+                    <button type="button" class="btn-icon remove-edp" title="删除" style="opacity:0.6;">✕</button>
+                </div>`;
+            });
+            const seasonOpts = ['春季','夏季','秋季','冬季'].map(s => `<option value="${s}" ${s === exp.season ? 'selected' : ''}>${s}</option>`).join('');
+            const qualityOpts = ['清澈','微浊','浑浊','异味','干涸'].map(q => `<option value="${q}" ${q === exp.water_quality ? 'selected' : ''}>${q}</option>`).join('');
+            content.innerHTML = `<div style="padding:20px;">
+                <div class="form-row two-col">
+                    <label class="form-group"><span class="form-label">实验名称</span><input type="text" id="e-name" value="${exp.experiment_name}" maxlength="200"></label>
+                    <label class="form-group"><span class="form-label">季节</span><select id="e-season">${seasonOpts}</select></label>
+                </div>
+                <div class="form-row two-col">
+                    <label class="form-group"><span class="form-label">天气</span><input type="text" id="e-weather" value="${exp.weather || ''}" maxlength="50"></label>
+                    <label class="form-group"><span class="form-label">水质</span><select id="e-quality">${qualityOpts}</select></label>
+                </div>
+                <div class="form-row two-col">
+                    <label class="form-group"><span class="form-label">地下水位(m)</span><input type="number" id="e-water-level" step="0.1" value="${exp.underground_water_level_m}"></label>
+                    <label class="form-group"><span class="form-label">井水温度(℃)</span><input type="number" id="e-water-temp" step="0.5" value="${exp.well_water_temp_c}"></label>
+                </div>
+                <div class="form-row two-col">
+                    <label class="form-group"><span class="form-label">汲水频率</span><input type="number" id="e-draw-freq" min="1" value="${exp.draw_frequency}"></label>
+                    <label class="form-group"><span class="form-label">观测日期</span><input type="text" id="e-obs-date" value="${exp.observation_date || ''}" maxlength="10"></label>
+                </div>
+                <div class="form-row"><label class="form-group"><span class="form-label">备注</span><textarea id="e-notes" rows="2" maxlength="5000">${exp.notes || ''}</textarea></label></div>
+                <div style="margin-bottom:10px; font-weight:600; color:#1E4D8C;">数据点：</div>
+                <div id="edit-dp-container" style="border:1px solid #E8DFD0; border-radius:8px; padding:12px; max-height:280px; overflow-y:auto; background:#FFFBF5;">${dpsHtml}</div>
+                <div style="margin-top:10px;"><button type="button" class="btn-secondary" onclick="addEditHydroDp()">+ 添加数据点</button></div>
+                <div id="edit-hydro-error" class="error-msg hidden" style="margin-top:12px;"></div>
+                <div class="modal-footer">
+                    <button type="button" class="btn-secondary" onclick="closeModal('hydro-edit-modal')">取消</button>
+                    <button type="button" class="btn-primary" onclick="saveHydroExperiment(${expId})">💾 保存修改并重新计算</button>
+                </div>
+            </div>`;
+            content.querySelectorAll('.remove-edp').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    const rows = content.querySelectorAll('#edit-dp-container .hydro-dp-row');
+                    if (rows.length > 2) this.parentElement.remove();
+                    else showToast('至少需要2个数据点', 'error');
+                });
+            });
+        });
+}
+
+function addEditHydroDp() {
+    const container = document.querySelector('#edit-dp-container');
+    const rows = container.querySelectorAll('.hydro-dp-row');
+    const idx = rows.length;
+    const lastElapsed = rows.length > 0 ? parseFloat(rows[rows.length - 1].querySelector('.edp-elapsed').value) || 0 : 0;
+    const row = document.createElement('div');
+    row.className = 'hydro-dp-row';
+    row.style.cssText = 'display:flex; gap:8px; align-items:center; padding:6px 0; border-bottom:1px dashed #E8DFD0; flex-wrap:wrap;';
+    row.innerHTML = `
+        <span style="width:28px; text-align:center; font-weight:600; color:#1E4D8C;">${idx + 1}</span>
+        <input type="number" step="0.5" min="0" class="edp-elapsed" value="${(lastElapsed + 5).toFixed(1)}" style="flex:1; min-width:70px; padding:6px; border:1px solid #ccc; border-radius:6px;">
+        <input type="number" step="0.01" class="edp-water-level" value="0" style="flex:1; min-width:70px; padding:6px; border:1px solid #ccc; border-radius:6px;">
+        <input type="number" step="0.1" class="edp-water-temp" value="15" style="flex:1; min-width:70px; padding:6px; border:1px solid #ccc; border-radius:6px;">
+        <input type="number" step="0.1" min="0" class="edp-flow-rate" value="0" style="flex:1; min-width:70px; padding:6px; border:1px solid #ccc; border-radius:6px;">
+        <input type="number" step="0.1" min="0" max="100" class="edp-draw-eff" value="0" style="flex:1; min-width:70px; padding:6px; border:1px solid #ccc; border-radius:6px;">
+        <input type="number" step="0.1" min="0" max="10" class="edp-labor-burden" value="0" style="flex:1; min-width:70px; padding:6px; border:1px solid #ccc; border-radius:6px;">
+        <input type="number" step="0.01" min="0" max="1" class="edp-stability" value="0" style="flex:1; min-width:70px; padding:6px; border:1px solid #ccc; border-radius:6px;">
+        <button type="button" class="btn-icon" onclick="this.parentElement.remove();" title="删除" style="opacity:0.6;">✕</button>`;
+    container.appendChild(row);
+}
+
+function saveHydroExperiment(expId) {
+    const content = document.getElementById('hydro-edit-content');
+    const rows = content.querySelectorAll('#edit-dp-container .hydro-dp-row');
+    const errDiv = document.getElementById('edit-hydro-error');
+    if (rows.length < 2) { errDiv.textContent = '至少需要2个数据点'; errDiv.classList.remove('hidden'); return; }
+    const dps = [];
+    let lastE = -1;
+    for (let i = 0; i < rows.length; i++) {
+        const e = parseFloat(rows[i].querySelector('.edp-elapsed').value);
+        const wl = parseFloat(rows[i].querySelector('.edp-water-level').value) || 0;
+        const wt = parseFloat(rows[i].querySelector('.edp-water-temp').value) || 0;
+        const fr = parseFloat(rows[i].querySelector('.edp-flow-rate').value) || 0;
+        const de = parseFloat(rows[i].querySelector('.edp-draw-eff').value) || 0;
+        const lb = parseFloat(rows[i].querySelector('.edp-labor-burden').value) || 0;
+        const si = parseFloat(rows[i].querySelector('.edp-stability').value) || 0;
+        if (isNaN(e)) { errDiv.textContent = `第${i + 1}个数据点时间不能为空`; errDiv.classList.remove('hidden'); return; }
+        if (e <= lastE) { errDiv.textContent = `第${i + 1}个数据点时间必须递增`; errDiv.classList.remove('hidden'); return; }
+        lastE = e;
+        dps.push({ point_index: i, elapsed_min: e, water_level_m: wl, water_temp_c: wt, flow_rate_lpm: fr, draw_efficiency_pct: de, labor_burden_score: lb, stability_index: si });
+    }
+    const payload = {
+        meta: {
+            experiment_name: document.getElementById('e-name').value,
+            season: document.getElementById('e-season').value,
+            weather: document.getElementById('e-weather').value,
+            underground_water_level_m: parseFloat(document.getElementById('e-water-level').value) || 0,
+            well_water_temp_c: parseFloat(document.getElementById('e-water-temp').value) || 15,
+            water_quality: document.getElementById('e-quality').value,
+            draw_frequency: parseInt(document.getElementById('e-draw-freq').value) || 1,
+            observation_date: document.getElementById('e-obs-date').value,
+            notes: document.getElementById('e-notes').value
+        },
+        data_points: dps
+    };
+    fetch(`/api/hydro-experiments/${expId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            showToast('保存成功，分析已重新计算', 'success');
+            setTimeout(() => { closeModal('hydro-edit-modal'); location.reload(); }, 600);
+        } else {
+            errDiv.textContent = data.error || '保存失败'; errDiv.classList.remove('hidden');
+            showToast(data.error || '保存失败', 'error');
+        }
+    })
+    .catch(err => { errDiv.textContent = '网络错误'; errDiv.classList.remove('hidden'); });
+}
+
+function loadHydroAvailableExperiments() {
+    const wid = document.getElementById('cmp-well').value;
+    const container = document.getElementById('hydro-available-exps');
+    if (!wid) { container.innerHTML = '<p class="muted" style="margin:0; font-size:13px;">请先选择古井以加载可用实验</p>'; return; }
+    container.innerHTML = '<p class="muted" style="margin:0; font-size:13px;">加载中...</p>';
+    fetch(`/api/wells/${wid}/hydro-experiments`)
+        .then(r => r.json())
+        .then(data => {
+            if (!data.experiments || data.experiments.length === 0) {
+                container.innerHTML = '<p class="muted" style="margin:0; font-size:13px; color:#d32f2f;">该古井暂无水文实验，请先创建实验记录</p>';
+                return;
+            }
+            let html = '';
+            data.experiments.forEach(exp => {
+                const score = exp.analysis_result ? (exp.analysis_result.overall_score * 100).toFixed(1) : '-';
+                html += `<label style="display:flex; align-items:center; gap:10px; padding:10px; margin-bottom:6px; border-radius:6px; border:1px solid #E8DFD0; cursor:pointer; background:#fff;">
+                    <input type="checkbox" class="cmp-exp-item" value="${exp.id}" style="width:18px; height:18px;">
+                    <div style="flex:1;">
+                        <strong style="color:#1E4D8C;">${exp.experiment_name}</strong>
+                        <div style="font-size:12px; color:#888; margin-top:4px;">
+                            ${exp.season} · ${exp.weather} · 水位${exp.underground_water_level_m}m · 水温${exp.well_water_temp_c}℃ · ${exp.water_quality} · 评分${score}
+                        </div>
+                    </div>
+                </label>`;
+            });
+            html += `<p class="muted" style="margin:8px 0 0; font-size:12px;">共 ${data.experiments.length} 个实验，至少选择 2 个进行对比</p>`;
+            container.innerHTML = html;
+        })
+        .catch(err => {
+            container.innerHTML = '<p style="color:#d32f2f; margin:0; font-size:13px;">加载失败：' + err.message + '</p>';
+        });
+}
+
+function createHydroComparison() {
+    const wid = document.getElementById('cmp-well').value;
+    const periodName = document.getElementById('cmp-period-name').value.trim();
+    const checked = document.querySelectorAll('.cmp-exp-item:checked');
+    const errDiv = document.getElementById('cmp-error');
+    errDiv.classList.add('hidden');
+    if (!wid) { errDiv.textContent = '请选择古井'; errDiv.classList.remove('hidden'); return; }
+    if (!periodName) { errDiv.textContent = '请输入周期名称'; errDiv.classList.remove('hidden'); return; }
+    if (checked.length < 2) { errDiv.textContent = '至少需要选择 2 个实验进行对比'; errDiv.classList.remove('hidden'); return; }
+    const experiment_ids = Array.from(checked).map(c => parseInt(c.value));
+    const payload = {
+        period_name: periodName,
+        description: document.getElementById('cmp-desc').value.trim(),
+        experiment_ids: experiment_ids
+    };
+    fetch(`/api/wells/${wid}/hydro-comparisons`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            showToast('对比组创建成功，已自动分析', 'success');
+            setTimeout(() => {
+                document.getElementById('cmp-period-name').value = '';
+                document.getElementById('cmp-desc').value = '';
+                document.querySelectorAll('.cmp-exp-item').forEach(c => c.checked = false);
+                viewHydroComparison(data.comparison_id);
+            }, 500);
+        } else {
+            errDiv.textContent = data.error || '创建失败'; errDiv.classList.remove('hidden');
+            showToast(data.error || '创建失败', 'error');
+        }
+    })
+    .catch(err => { errDiv.textContent = '网络错误'; errDiv.classList.remove('hidden'); });
+}
+
+function viewHydroComparison(periodId) {
+    const container = document.getElementById('hydro-comparison-result');
+    container.style.display = 'block';
+    container.innerHTML = '<div style="padding:40px; text-align:center; color:#888;"><div class="spinner" style="margin:0 auto 12px;"></div>分析中...</div>';
+    fetch(`/api/hydro-comparisons/${periodId}`)
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success) {
+                container.innerHTML = `<div style="padding:20px; color:#d32f2f;">加载失败：${data.error || '未知错误'}</div>`;
+                return;
+            }
+            renderHydroComparisonResult(data);
+        })
+        .catch(err => {
+            container.innerHTML = `<div style="padding:20px; color:#d32f2f;">网络错误：${err.message}</div>`;
+        });
+}
+
+const HYDRO_CMP_COLORS = ['#1E4D8C', '#2E7D8A', '#B8860B', '#8B4513', '#6A3D9A', '#C04D5A', '#1B7A3E', '#E65100'];
+
+function renderHydroComparisonResult(data) {
+    const container = document.getElementById('hydro-comparison-result');
+    const items = data.items || [];
+    const seasonComp = data.season_comparison || {};
+
+    let seasonHtml = '';
+    if (seasonComp && Object.keys(seasonComp).length > 0) {
+        seasonHtml = '<div style="padding:16px; background:#E8F4FD; border:1px solid #90CAF9; border-radius:8px; margin-bottom:16px;"><div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;"><span style="font-size:24px;">🌡️</span><strong style="font-size:16px; color:#1E4D8C;">季节对比分析</strong></div>';
+        const seasons = Object.keys(seasonComp);
+        seasonHtml += '<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px,1fr)); gap:12px;">';
+        seasons.forEach(s => {
+            const sc = seasonComp[s];
+            seasonHtml += `<div style="padding:12px; background:#fff; border-radius:6px; border-left:4px solid #1E4D8C;">
+                <div style="font-weight:600; color:#1E4D8C; margin-bottom:8px;">${s}</div>
+                <div style="font-size:13px; color:#5C4033; line-height:1.8;">
+                    <div>平均流量：<strong>${(sc.avg_flow_rate || 0).toFixed(2)} L/min</strong></div>
+                    <div>平均水位：<strong>${(sc.avg_water_level || 0).toFixed(2)} m</strong></div>
+                    <div>平均水温：<strong>${(sc.avg_water_temp || 0).toFixed(1)} ℃</strong></div>
+                    <div>环境敏感度：<strong>${(sc.env_sensitivity || 0).toFixed(2)}</strong></div>
+                    <div>综合评分：<strong style="color:#1E4D8C;">${((sc.overall_score || 0) * 100).toFixed(1)} 分</strong></div>
+                </div>
+            </div>`;
+        });
+        seasonHtml += '</div></div>';
+    }
+
+    container.innerHTML = `
+        ${seasonHtml}
+        <div style="margin-bottom:16px;">
+            <h4 style="margin:0 0 8px; color:#1E4D8C;">📊 多组实验流量对比</h4>
+            <div id="hydro-cmp-flow-chart" style="height:360px; background:#fff; padding:10px; border-radius:6px; border:1px solid #E8DFD0;"></div>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px;">
+            <div>
+                <h4 style="margin:0 0 8px; color:#1E4D8C;">🎯 环境敏感度雷达图</h4>
+                <div id="hydro-cmp-radar-chart" style="height:360px; background:#fff; padding:10px; border-radius:6px; border:1px solid #E8DFD0;"></div>
+            </div>
+            <div>
+                <h4 style="margin:0 0 8px; color:#1E4D8C;">📊 综合指标对比</h4>
+                <div id="hydro-cmp-bar-chart" style="height:360px; background:#fff; padding:10px; border-radius:6px; border:1px solid #E8DFD0;"></div>
+            </div>
+        </div>
+        <div>
+            <h4 style="margin:0 0 8px; color:#1E4D8C;">📋 详细指标对比表</h4>
+            <div id="hydro-cmp-detail-table" style="background:#fff; border-radius:6px; border:1px solid #E8DFD0; overflow:auto;"></div>
+        </div>`;
+
+    setTimeout(() => {
+        renderHydroCmpFlowChart(items);
+        renderHydroCmpRadarChart(items);
+        renderHydroCmpBarChart(items);
+        renderHydroCmpDetailTable(items);
+    }, 50);
+}
+
+function renderHydroCmpFlowChart(items) {
+    const el = document.getElementById('hydro-cmp-flow-chart');
+    if (!el || typeof Plotly === 'undefined' || !items.length) return;
+    const traces = [];
+    items.forEach((item, idx) => {
+        const dps = item.data_points || [];
+        const color = HYDRO_CMP_COLORS[idx % HYDRO_CMP_COLORS.length];
+        const nm = item.experiment ? item.experiment.experiment_name : `实验${idx + 1}`;
+        if (dps.length >= 2) {
+            traces.push({
+                x: dps.map(d => d.elapsed_min), y: dps.map(d => d.flow_rate_lpm),
+                mode: 'lines+markers', name: `${nm} - 流量`,
+                line: { color: color, width: 2.5 }, marker: { size: 5, color: color }
+            });
+        }
+    });
+    Plotly.newPlot(el, traces, {
+        margin: { t: 30, b: 50, l: 60, r: 20 },
+        xaxis: { title: '时间 (分钟)', gridcolor: '#F0E6D3' },
+        yaxis: { title: '流量 (L/min)', gridcolor: '#F0E6D3' },
+        legend: { orientation: 'h', y: -0.2 },
+        plot_bgcolor: '#FFFBF2', paper_bgcolor: '#FFFBF2',
+        font: { family: 'Segoe UI, sans-serif', color: '#1E4D8C' }
+    }, { responsive: true, displayModeBar: false });
+}
+
+function renderHydroCmpRadarChart(items) {
+    const el = document.getElementById('hydro-cmp-radar-chart');
+    if (!el || typeof Plotly === 'undefined' || !items.length) return;
+    const axes = ['平均流量', '峰值流量', '稳定性', '环境适应', '汲水效率'];
+    const traces = [];
+    items.forEach((item, idx) => {
+        const an = item.analysis_result || {};
+        const nm = item.experiment ? item.experiment.experiment_name : `实验${idx + 1}`;
+        const vals = [
+            Math.min(100, (an.avg_flow_rate || 0) * 8),
+            Math.min(100, (an.peak_flow || 0) * 6),
+            Math.min(100, 100 - (an.stability_index || 30)),
+            Math.min(100, 100 - (an.env_sensitivity || 0.5) * 100),
+            Math.min(100, (an.overall_score || 0.5) * 100)
+        ];
+        traces.push({
+            type: 'scatterpolar', r: vals, theta: axes,
+            fill: 'toself', name: nm,
+            line: { color: HYDRO_CMP_COLORS[idx % HYDRO_CMP_COLORS.length], width: 2 },
+            marker: { color: HYDRO_CMP_COLORS[idx % HYDRO_CMP_COLORS.length] },
+            opacity: 0.7
+        });
+    });
+    Plotly.newPlot(el, traces, {
+        margin: { t: 30, b: 30, l: 30, r: 30 },
+        polar: {
+            radialaxis: { range: [0, 100], gridcolor: '#E8DFD0', tickfont: { size: 10 }, tickvals: [0, 25, 50, 75, 100] },
+            angularaxis: { gridcolor: '#E8DFD0', tickfont: { size: 11, color: '#1E4D8C' } },
+            bgcolor: '#FFFBF2'
+        },
+        legend: { orientation: 'h', y: -0.1, font: { size: 10 } },
+        plot_bgcolor: '#FFFBF2', paper_bgcolor: '#FFFBF2',
+        font: { family: 'Segoe UI, sans-serif', color: '#1E4D8C' }
+    }, { responsive: true, displayModeBar: false });
+}
+
+function renderHydroCmpBarChart(items) {
+    const el = document.getElementById('hydro-cmp-bar-chart');
+    if (!el || typeof Plotly === 'undefined' || !items.length) return;
+    const names = items.map((item, i) => item.experiment ? item.experiment.experiment_name : `实验${i + 1}`);
+    const avgFlows = items.map(i => i.analysis_result ? (i.analysis_result.avg_flow_rate || 0) : 0);
+    const envSens = items.map(i => i.analysis_result ? (i.analysis_result.env_sensitivity || 0) * 50 : 0);
+    const overallScores = items.map(i => i.analysis_result ? ((i.analysis_result.overall_score || 0) * 100) : 0);
+    const traces = [
+        { x: names, y: avgFlows, type: 'bar', name: '平均流量(L/min)', marker: { color: '#1E4D8C' }, text: avgFlows.map(v => v.toFixed(2)), textposition: 'auto' },
+        { x: names, y: overallScores, type: 'bar', name: '综合评分', marker: { color: '#2E7D8A' }, text: overallScores.map(v => v.toFixed(1)), textposition: 'auto' },
+        { x: names, y: envSens, type: 'bar', name: '环境敏感度(×50)', marker: { color: '#B8860B' }, text: envSens.map(v => v.toFixed(1)), textposition: 'auto' }
+    ];
+    Plotly.newPlot(el, traces, {
+        margin: { t: 30, b: 80, l: 60, r: 20 },
+        barmode: 'group',
+        xaxis: { gridcolor: '#F0E6D3', tickangle: -20, tickfont: { size: 11 } },
+        yaxis: { title: '数值', gridcolor: '#F0E6D3' },
+        legend: { orientation: 'h', y: -0.3, font: { size: 10 } },
+        plot_bgcolor: '#FFFBF2', paper_bgcolor: '#FFFBF2',
+        font: { family: 'Segoe UI, sans-serif', color: '#1E4D8C' }
+    }, { responsive: true, displayModeBar: false });
+}
+
+function renderHydroCmpDetailTable(items) {
+    const el = document.getElementById('hydro-cmp-detail-table');
+    if (!el || !items.length) return;
+    const rows = [
+        ['实验名称', i => i.experiment ? i.experiment.experiment_name : '-'],
+        ['季节', i => i.experiment ? i.experiment.season : '-'],
+        ['天气', i => i.experiment ? i.experiment.weather : '-'],
+        ['水位 (m)', i => i.experiment ? i.experiment.underground_water_level_m : '-'],
+        ['水温 (℃)', i => i.experiment ? i.experiment.well_water_temp_c : '-'],
+        ['水质', i => i.experiment ? i.experiment.water_quality : '-'],
+        ['平均流量 (L/min)', i => i.analysis_result ? (i.analysis_result.avg_flow_rate || 0).toFixed(2) : '-'],
+        ['峰值流量 (L/min)', i => i.analysis_result ? (i.analysis_result.peak_flow || 0).toFixed(2) : '-'],
+        ['环境敏感度', i => i.analysis_result ? (i.analysis_result.env_sensitivity || 0).toFixed(3) : '-'],
+        ['稳定性指数 (%)', i => i.analysis_result ? (i.analysis_result.stability_index || 0).toFixed(2) : '-'],
+        ['劳作负荷', i => i.analysis_result ? (i.analysis_result.labor_burden || 0).toFixed(2) : '-'],
+        ['综合评分', i => i.analysis_result ? ((i.analysis_result.overall_score || 0) * 100).toFixed(1) : '-']
+    ];
+    let html = '<table style="width:100%; border-collapse:collapse; font-size:12px;"><thead><tr style="background:#E8F4FD;">';
+    html += '<th style="padding:8px 12px; border:1px solid #D4C5A9; text-align:left; color:#1E4D8C; position:sticky; left:0; background:#E8F4FD; z-index:1;">指标</th>';
+    items.forEach((item, i) => {
+        const nm = item.experiment ? item.experiment.experiment_name : `实验${i + 1}`;
+        html += `<th style="padding:8px 12px; border:1px solid #D4C5A9; text-align:center; color:#1E4D8C;">${nm}</th>`;
+    });
+    html += '</tr></thead><tbody>';
+    rows.forEach(([label, fn]) => {
+        html += `<tr><td style="padding:8px 12px; border:1px solid #D4C5A9; font-weight:600; color:#1E4D8C; position:sticky; left:0; background:#FFFBF2; z-index:1;">${label}</td>`;
+        items.forEach(item => {
+            const val = fn(item);
+            html += `<td style="padding:8px 12px; border:1px solid #D4C5A9; text-align:center;">${val}</td>`;
+        });
+        html += '</tr>';
+    });
+    html += '</tbody></table>';
+    el.innerHTML = html;
+}
+
+function createHydroReport() {
+    const wellId = parseInt(document.getElementById('rpt-well').value);
+    const title = document.getElementById('rpt-title').value.trim();
+    const errDiv = document.getElementById('rpt-error');
+    errDiv.classList.add('hidden');
+    if (!wellId) { errDiv.textContent = '请选择古井'; errDiv.classList.remove('hidden'); return; }
+    if (!title) { errDiv.textContent = '请输入报告标题'; errDiv.classList.remove('hidden'); return; }
+    const payload = {
+        title: title,
+        author: document.getElementById('rpt-author').value.trim(),
+        summary: document.getElementById('rpt-summary').value.trim(),
+        conclusions: document.getElementById('rpt-conclusions').value.trim()
+    };
+    fetch(`/api/wells/${wellId}/hydro-reports`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            showToast('研究报告创建成功', 'success');
+            setTimeout(() => location.reload(), 800);
+        } else {
+            errDiv.textContent = data.error || '创建失败'; errDiv.classList.remove('hidden');
+            showToast(data.error || '创建失败', 'error');
+        }
+    })
+    .catch(err => { errDiv.textContent = '网络错误'; errDiv.classList.remove('hidden'); });
+}
+
+function viewHydroReport(reportId) {
+    fetch(`/api/hydro-reports/${reportId}`)
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success) { showToast(data.error || '加载失败', 'error'); return; }
+            const rpt = data.report;
+            const modal = document.getElementById('hydro-view-modal');
+            const content = document.getElementById('hydro-view-content');
+            modal.classList.add('show');
+            content.innerHTML = `<div style="padding:20px;">
+                <h2 style="margin:0 0 16px; color:#1E4D8C;">${rpt.title}</h2>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px; font-size:14px;">
+                    <div><strong>作者：</strong>${rpt.author || '-'}</div>
+                    <div><strong>创建时间：</strong>${rpt.created_at || '-'}</div>
+                </div>
+                ${rpt.summary ? `<div style="margin-bottom:16px;"><strong style="color:#1E4D8C;">研究摘要</strong><div style="margin-top:8px; padding:12px; background:#FFFBF5; border-radius:6px; border-left:4px solid #1E4D8C; line-height:1.8;">${rpt.summary}</div></div>` : ''}
+                ${rpt.conclusions ? `<div style="margin-bottom:16px;"><strong style="color:#1E4D8C;">研究结论</strong><div style="margin-top:8px; padding:12px; background:#E8F4FD; border-radius:6px; border-left:4px solid #2E7D8A; line-height:1.8;">${rpt.conclusions}</div></div>` : ''}
+            </div>`;
+        })
+        .catch(err => showToast('加载报告失败', 'error'));
+}
+</script>
+{% endblock %}

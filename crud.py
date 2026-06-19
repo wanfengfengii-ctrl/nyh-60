@@ -8,7 +8,9 @@ from models import (
     LaborExperiment, LaborTimePoint, LaborAnalysisResult,
     LaborComparisonGroup, LaborComparisonItem,
     SceneConfig, LaborScheme, SceneSimulation, SimulationTimePoint,
-    OptimizationReport, OptimizationReportItem
+    OptimizationReport, OptimizationReportItem,
+    HydroExperiment, HydroExperimentDataPoint, HydroAnalysisResult,
+    HydroComparisonPeriod, HydroResearchReport
 )
 from schemas import (
     WellCreate, WellUpdate,
@@ -20,7 +22,9 @@ from schemas import (
     LaborComparisonGroupCreate,
     SceneConfigCreate, SceneConfigUpdate,
     LaborSchemeCreate, LaborSchemeUpdate,
-    OptimizationReportCreate
+    OptimizationReportCreate,
+    HydroExperimentCreate, HydroExperimentUpdate,
+    HydroComparisonPeriodCreate, HydroResearchReportCreate
 )
 from calculator import (
     calculate_experiment_efficiency,
@@ -30,7 +34,10 @@ from calculator import (
     predict_efficiency,
     calculate_labor_analysis,
     calculate_synergy_gain,
-    calculate_multi_round_comparison
+    calculate_multi_round_comparison,
+    calculate_hydro_analysis,
+    calculate_hydro_period_comparison,
+    generate_hydro_report_content
 )
 
 
@@ -1367,6 +1374,312 @@ def get_optimization_report(db: Session, report_id: int) -> Optional[Optimizatio
 def delete_optimization_report(db: Session, report_id: int) -> bool:
     from models import OptimizationReport
     report = get_optimization_report(db, report_id)
+    if report:
+        db.delete(report)
+        db.commit()
+        return True
+    return False
+
+
+def get_hydro_experiments(db: Session, well_id: Optional[int] = None, skip: int = 0, limit: int = 100) -> List[HydroExperiment]:
+    query = db.query(HydroExperiment)
+    if well_id:
+        query = query.filter(HydroExperiment.well_id == well_id)
+    return query.order_by(desc(HydroExperiment.created_at)).offset(skip).limit(limit).all()
+
+
+def get_hydro_experiment(db: Session, exp_id: int) -> Optional[HydroExperiment]:
+    return db.query(HydroExperiment).filter(HydroExperiment.id == exp_id).first()
+
+
+def create_hydro_experiment(db: Session, data: HydroExperimentCreate, well_id: int) -> HydroExperiment:
+    if data.config_id:
+        cfg = get_config(db, data.config_id)
+        if not cfg or cfg.well_id != well_id:
+            raise ValueError("指定的参数配置不存在或不属于该古井")
+
+    experiment = HydroExperiment(
+        well_id=well_id,
+        config_id=data.config_id,
+        experiment_name=data.experiment_name,
+        season=data.season,
+        weather=data.weather,
+        underground_water_level_m=data.underground_water_level_m,
+        well_water_temp_c=data.well_water_temp_c,
+        water_quality=data.water_quality,
+        draw_frequency=data.draw_frequency,
+        observation_date=data.observation_date or "",
+        notes=data.notes or "",
+    )
+    db.add(experiment)
+    db.flush()
+
+    for dp_data in data.data_points:
+        dp = HydroExperimentDataPoint(
+            experiment_id=experiment.id,
+            point_index=dp_data.point_index,
+            elapsed_min=dp_data.elapsed_min,
+            water_level_m=dp_data.water_level_m,
+            water_temp_c=dp_data.water_temp_c,
+            flow_rate_lpm=dp_data.flow_rate_lpm,
+            draw_efficiency_pct=dp_data.draw_efficiency_pct,
+            labor_burden_score=dp_data.labor_burden_score,
+            stability_index=dp_data.stability_index,
+        )
+        db.add(dp)
+
+    db.flush()
+
+    analysis_data = calculate_hydro_analysis(experiment, experiment.data_points)
+    if analysis_data:
+        analysis_result = HydroAnalysisResult(
+            experiment_id=experiment.id,
+            **analysis_data
+        )
+        db.add(analysis_result)
+
+    db.commit()
+    db.refresh(experiment)
+    return experiment
+
+
+def update_hydro_experiment(db: Session, experiment: HydroExperiment, data: HydroExperimentUpdate) -> HydroExperiment:
+    update_data = data.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(experiment, field, value)
+    db.flush()
+
+    analysis_data = calculate_hydro_analysis(experiment, experiment.data_points)
+    existing_result = db.query(HydroAnalysisResult).filter(HydroAnalysisResult.experiment_id == experiment.id).first()
+    if existing_result and analysis_data:
+        for k, v in analysis_data.items():
+            if hasattr(existing_result, k):
+                setattr(existing_result, k, v)
+    elif analysis_data:
+        analysis_result = HydroAnalysisResult(experiment_id=experiment.id, **analysis_data)
+        db.add(analysis_result)
+
+    db.commit()
+    db.refresh(experiment)
+    return experiment
+
+
+def update_hydro_data_points(db: Session, experiment: HydroExperiment, data_points_data: List[Dict[str, Any]]) -> HydroExperiment:
+    elapsed_list = [dp["elapsed_min"] for dp in data_points_data]
+    for i in range(1, len(elapsed_list)):
+        if elapsed_list[i] <= elapsed_list[i - 1]:
+            raise ValueError(f"时间点必须严格递增：第{i+1}个({elapsed_list[i]}min)不大于第{i}个({elapsed_list[i-1]}min)")
+
+    for dp in experiment.data_points:
+        db.delete(dp)
+    db.flush()
+
+    for idx, dp_data in enumerate(data_points_data):
+        dp = HydroExperimentDataPoint(
+            experiment_id=experiment.id,
+            point_index=dp_data.get("point_index", idx),
+            elapsed_min=dp_data["elapsed_min"],
+            water_level_m=dp_data.get("water_level_m", 0),
+            water_temp_c=dp_data.get("water_temp_c", 15),
+            flow_rate_lpm=dp_data.get("flow_rate_lpm", 0),
+            draw_efficiency_pct=dp_data.get("draw_efficiency_pct", 100),
+            labor_burden_score=dp_data.get("labor_burden_score", 0),
+            stability_index=dp_data.get("stability_index", 1.0),
+        )
+        db.add(dp)
+
+    db.flush()
+
+    analysis_data = calculate_hydro_analysis(experiment, experiment.data_points)
+    existing_result = db.query(HydroAnalysisResult).filter(HydroAnalysisResult.experiment_id == experiment.id).first()
+    if existing_result and analysis_data:
+        for k, v in analysis_data.items():
+            if hasattr(existing_result, k):
+                setattr(existing_result, k, v)
+    elif analysis_data:
+        analysis_result = HydroAnalysisResult(experiment_id=experiment.id, **analysis_data)
+        db.add(analysis_result)
+
+    db.commit()
+    db.refresh(experiment)
+    return experiment
+
+
+def delete_hydro_experiment(db: Session, exp_id: int) -> bool:
+    experiment = get_hydro_experiment(db, exp_id)
+    if experiment:
+        db.delete(experiment)
+        db.commit()
+        return True
+    return False
+
+
+def recalculate_hydro_experiment(db: Session, experiment: HydroExperiment) -> HydroAnalysisResult:
+    analysis_data = calculate_hydro_analysis(experiment, experiment.data_points)
+    existing_result = db.query(HydroAnalysisResult).filter(HydroAnalysisResult.experiment_id == experiment.id).first()
+    if existing_result and analysis_data:
+        for k, v in analysis_data.items():
+            if hasattr(existing_result, k):
+                setattr(existing_result, k, v)
+        db.commit()
+        db.refresh(existing_result)
+        return existing_result
+    elif analysis_data:
+        result = HydroAnalysisResult(experiment_id=experiment.id, **analysis_data)
+        db.add(result)
+        db.commit()
+        db.refresh(result)
+        return result
+    raise ValueError("数据不足，无法计算分析结果")
+
+
+def get_hydro_comparison_periods(db: Session, well_id: Optional[int] = None, skip: int = 0, limit: int = 50) -> List[HydroComparisonPeriod]:
+    query = db.query(HydroComparisonPeriod)
+    if well_id:
+        query = query.filter(HydroComparisonPeriod.well_id == well_id)
+    return query.order_by(desc(HydroComparisonPeriod.created_at)).offset(skip).limit(limit).all()
+
+
+def get_hydro_comparison_period(db: Session, period_id: int) -> Optional[HydroComparisonPeriod]:
+    return db.query(HydroComparisonPeriod).filter(HydroComparisonPeriod.id == period_id).first()
+
+
+def create_hydro_comparison_period(db: Session, well_id: int, data: HydroComparisonPeriodCreate) -> HydroComparisonPeriod:
+    import json
+    well = get_well(db, well_id)
+    if not well:
+        raise ValueError("指定的古井不存在")
+
+    for exp_id in data.experiment_ids:
+        exp = get_hydro_experiment(db, exp_id)
+        if not exp or exp.well_id != well_id:
+            raise ValueError(f"实验ID {exp_id} 不存在或不属于该古井")
+
+    experiments_data = []
+    for exp_id in data.experiment_ids:
+        exp = get_hydro_experiment(db, exp_id)
+        analysis = exp.analysis_result
+        analysis_dict = {}
+        if analysis:
+            import json as _json
+            analysis_dict = {
+                "avg_flow_rate_lpm": analysis.avg_flow_rate_lpm,
+                "peak_flow_rate_lpm": analysis.peak_flow_rate_lpm,
+                "avg_stability_index": analysis.avg_stability_index,
+                "avg_labor_burden": analysis.avg_labor_burden,
+                "env_sensitivity_coefficient": analysis.env_sensitivity_coefficient,
+                "overall_score": analysis.overall_score,
+            }
+        experiments_data.append({
+            "id": exp.id,
+            "experiment_name": exp.experiment_name,
+            "season": exp.season,
+            "weather": exp.weather,
+            "water_quality": exp.water_quality,
+            "analysis_result": analysis_dict,
+        })
+
+    comparison_result = calculate_hydro_period_comparison(experiments_data)
+
+    period = HydroComparisonPeriod(
+        well_id=well_id,
+        period_name=data.period_name,
+        description=data.description or "",
+        experiment_ids_json=json.dumps(data.experiment_ids),
+        comparison_result_json=json.dumps(comparison_result, ensure_ascii=False),
+    )
+    db.add(period)
+    db.commit()
+    db.refresh(period)
+    return period
+
+
+def delete_hydro_comparison_period(db: Session, period_id: int) -> bool:
+    period = get_hydro_comparison_period(db, period_id)
+    if period:
+        db.delete(period)
+        db.commit()
+        return True
+    return False
+
+
+def get_hydro_research_reports(db: Session, well_id: Optional[int] = None, skip: int = 0, limit: int = 100) -> List[HydroResearchReport]:
+    query = db.query(HydroResearchReport)
+    if well_id:
+        query = query.filter(HydroResearchReport.well_id == well_id)
+    return query.order_by(desc(HydroResearchReport.created_at)).offset(skip).limit(limit).all()
+
+
+def get_hydro_research_report(db: Session, report_id: int) -> Optional[HydroResearchReport]:
+    return db.query(HydroResearchReport).filter(HydroResearchReport.id == report_id).first()
+
+
+def create_hydro_research_report(db: Session, well_id: int, data: HydroResearchReportCreate) -> HydroResearchReport:
+    import json
+    well = get_well(db, well_id)
+    if not well:
+        raise ValueError("指定的古井不存在")
+
+    experiments = get_hydro_experiments(db, well_id=well_id)
+    periods = get_hydro_comparison_periods(db, well_id=well_id)
+
+    period_comparisons = []
+    for p in periods:
+        cr = p.comparison_result_json
+        if cr:
+            try:
+                comp = json.loads(cr)
+            except Exception:
+                comp = {}
+        else:
+            comp = {}
+        comp["period_name"] = p.period_name
+        period_comparisons.append(comp)
+
+    report_data = {
+        "conclusions": data.conclusions or "",
+    }
+    report_content = generate_hydro_report_content(well, experiments, period_comparisons, report_data)
+
+    key_findings = []
+    if experiments:
+        best_exp = max(experiments, key=lambda e: e.analysis_result.overall_score if e.analysis_result else 0)
+        if best_exp.analysis_result:
+            key_findings.append(f"最优季节条件: {best_exp.season}({best_exp.experiment_name}), 评分{best_exp.analysis_result.overall_score:.1f}")
+        worst_exp = min(experiments, key=lambda e: e.analysis_result.overall_score if e.analysis_result else 0)
+        if worst_exp.analysis_result:
+            key_findings.append(f"最差季节条件: {worst_exp.season}({worst_exp.experiment_name}), 评分{worst_exp.analysis_result.overall_score:.1f}")
+
+    recommendations = []
+    for exp in experiments:
+        if exp.analysis_result and exp.analysis_result.anomaly_warnings_json:
+            try:
+                warnings = json.loads(exp.analysis_result.anomaly_warnings_json)
+                if warnings:
+                    recommendations.append(f"{exp.experiment_name}: 检测到{len(warnings)}处异常波动，需关注")
+            except Exception:
+                pass
+
+    report = HydroResearchReport(
+        well_id=well_id,
+        title=data.title,
+        author=data.author or "",
+        summary=data.summary or "",
+        conclusions=data.conclusions or "",
+        report_content=report_content,
+        experiment_count=len(experiments),
+        period_count=len(periods),
+        key_findings_json=json.dumps(key_findings, ensure_ascii=False),
+        recommendations="\n".join(recommendations) if recommendations else "当前数据表现良好，无明显异常。",
+    )
+    db.add(report)
+    db.commit()
+    db.refresh(report)
+    return report
+
+
+def delete_hydro_research_report(db: Session, report_id: int) -> bool:
+    report = get_hydro_research_report(db, report_id)
     if report:
         db.delete(report)
         db.commit()
