@@ -25,6 +25,7 @@
                     <span class="nav-badge">{{ pending_count }}</span>
                     {% endif %}
                 </a>
+                <a href="/labor-analysis" class="nav-link {% if request.url.path == '/labor-analysis' %}active{% endif %}">劳作负荷分析</a>
                 <a href="/comparison" class="nav-link {% if request.url.path == '/comparison' %}active{% endif %}">古井对比</a>
                 <a href="/reports" class="nav-link {% if request.url.path == '/reports' %}active{% endif %}">研究报告</a>
             </nav>

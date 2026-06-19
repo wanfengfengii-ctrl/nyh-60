@@ -1,0 +1,1486 @@
+{% extends "base.html" %}
+
+{% block title %}劳作负荷与协同效率分析 - 古井汲水效率复原平台{% endblock %}
+
+{% block content %}
+<div class="page-header" style="padding:24px 32px; background:linear-gradient(135deg, #8B4513 0%, #5C4033 100%); color:#FFFBF5;">
+    <h1 style="margin:0 0 8px 0; font-family:'Noto Serif SC'; font-size:28px;">⛲ 劳作负荷与协同效率分析</h1>
+    <p style="margin:0; opacity:0.9; font-size:14px;">分析不同人数、分工方式下的汲水效率差异；计算单位人力出水量、效率变化曲线、协同增益系数</p>
+</div>
+
+<div style="padding:24px 32px;">
+    <div class="tabs" style="margin-bottom:24px;">
+        <button class="tab-btn active" data-tab="tab-create">📝 新建实验记录</button>
+        <button class="tab-btn" data-tab="tab-list">📋 实验记录列表</button>
+        <button class="tab-btn" data-tab="tab-charts">📊 可视化分析</button>
+        <button class="tab-btn" data-tab="tab-compare">🔬 多组对比研究</button>
+    </div>
+
+    <div id="tab-create" class="tab-content active">
+        <div class="panel">
+            <div class="panel-header">
+                <h3>劳作负荷实验数据录入</h3>
+            </div>
+            <form id="labor-exp-form">
+                <div class="form-row two-col">
+                    <label class="form-group">
+                        <span class="form-label">选择古井 <em>*</em></span>
+                        <select id="f-well" required onchange="loadConfigsForWell()">
+                            <option value="">-- 请选择古井 --</option>
+                            {% for w in wells %}
+                            <option value="{{ w.id }}">{{ w.name }}{% if w.location %}（{{ w.location }}）{% endif %}</option>
+                            {% endfor %}
+                        </select>
+                    </label>
+                    <label class="form-group">
+                        <span class="form-label">参数配置（可选）</span>
+                        <select id="f-config">
+                            <option value="">不关联结构参数</option>
+                        </select>
+                    </label>
+                </div>
+
+                <div class="form-row two-col">
+                    <label class="form-group">
+                        <span class="form-label">实验名称 <em>*</em></span>
+                        <input type="text" id="f-name" maxlength="200" required placeholder="如：单人独立-连续汲水30min">
+                    </label>
+                    <label class="form-group">
+                        <span class="form-label">分工方式 <em>*</em></span>
+                        <select id="f-mode" required>
+                            <option value="单人独立">单人独立</option>
+                            <option value="双人轮流">双人轮流</option>
+                            <option value="三人交替">三人交替</option>
+                            <option value="多人协同">多人协同</option>
+                            <option value="自定义">自定义</option>
+                        </select>
+                    </label>
+                </div>
+
+                <div class="form-row two-col">
+                    <label class="form-group">
+                        <span class="form-label">参与人数 <em>*</em></span>
+                        <input type="number" id="f-workers" min="1" step="1" value="1" required>
+                    </label>
+                    <label class="form-group">
+                        <span class="form-label">连续作业时长（分钟） <em>*</em></span>
+                        <input type="number" id="f-duration" min="1" step="0.5" value="30" required>
+                    </label>
+                </div>
+
+                <div class="form-row two-col">
+                    <label class="form-group">
+                        <span class="form-label">休息间隔（分钟） <em>*</em></span>
+                        <input type="number" id="f-rest" min="0" step="0.5" value="0">
+                        <small style="color:#888;">0表示无休息</small>
+                    </label>
+                    <label class="form-group">
+                        <span class="form-label">体力衰减系数（0~1）</span>
+                        <input type="number" id="f-fatigue" min="0" max="1" step="0.01" value="0.1">
+                        <small style="color:#888;">0=无衰减，1=完全衰减</small>
+                    </label>
+                </div>
+
+                <div class="form-row">
+                    <label class="form-group">
+                        <span class="form-label">实验备注</span>
+                        <textarea id="f-notes" rows="2" maxlength="5000" placeholder="记录实验条件、环境因素、人员状态等..."></textarea>
+                    </label>
+                </div>
+
+                <div class="form-row" style="margin-top:16px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                        <label class="form-group full-width" style="margin:0;">
+                            <span class="form-label">时间点数据（至少3个，时间必须递增，累计出水量不减少） <em>*</em></span>
+                        </label>
+                        <button type="button" class="btn-secondary" onclick="generateSampleData()" style="white-space:nowrap;">📐 填充示例数据</button>
+                    </div>
+                    <div id="labor-tp-container" style="border:1px solid #E8DFD0; border-radius:8px; padding:16px; background:#FFFBF5;">
+                    </div>
+                    <div style="margin-top:12px; display:flex; gap:8px;">
+                        <button type="button" class="btn-secondary" onclick="addLaborTimePoint()">+ 添加时间点</button>
+                        <button type="button" class="btn-secondary" onclick="addLaborRestPoint()">⏸ 添加休息段</button>
+                    </div>
+                </div>
+
+                <div id="labor-form-error" class="error-msg hidden" style="margin-top:16px;"></div>
+
+                <div class="form-actions" style="margin-top:24px;">
+                    <button type="submit" class="btn-primary" id="submit-labor-btn">💾 提交并计算分析</button>
+                    <button type="reset" class="btn-secondary" onclick="resetLaborForm()">重置</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="tab-list" class="tab-content">
+        <div class="panel">
+            <div class="panel-header">
+                <h3>劳作负荷实验记录</h3>
+                <div style="display:flex; gap:8px;">
+                    <select id="filter-well" onchange="filterLaborExperiments()" style="padding:6px 10px; border-radius:6px; border:1px solid #ccc;">
+                        <option value="">全部古井</option>
+                        {% for w in wells %}
+                        <option value="{{ w.id }}">{{ w.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+            <div id="labor-exp-list" class="table-wrapper">
+                {% if labor_experiments %}
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>实验名称</th>
+                            <th>古井</th>
+                            <th>人数</th>
+                            <th>分工方式</th>
+                            <th>时长(min)</th>
+                            <th>人均出水量</th>
+                            <th>峰值效率</th>
+                            <th>衰减率</th>
+                            <th>异常</th>
+                            <th>创建时间</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for exp in labor_experiments %}
+                        <tr id="labor-row-{{ exp.id }}">
+                            <td><strong>{{ exp.experiment_name }}</strong></td>
+                            <td class="text-center">
+                                {% for w in wells %}
+                                {% if w.id == exp.well_id %}{{ w.name }}{% endif %}
+                                {% endfor %}
+                            </td>
+                            <td class="text-center">{{ exp.worker_count }}人</td>
+                            <td class="text-center"><span class="status-tag valid">{{ exp.work_mode }}</span></td>
+                            <td class="text-center">{{ exp.continuous_duration_min }}</td>
+                            <td class="text-center highlight">
+                                {% if exp.analysis_result %}
+                                {{ exp.analysis_result.per_capita_flow_lpm }} L/min/人
+                                {% else %}-{% endif %}
+                            </td>
+                            <td class="text-center">
+                                {% if exp.analysis_result %}
+                                {{ exp.analysis_result.peak_flow_rate_lpm }} L/min
+                                {% else %}-{% endif %}
+                            </td>
+                            <td class="text-center">
+                                {% if exp.analysis_result %}
+                                <span style="color:{% if exp.analysis_result.efficiency_decay_pct > 30 %}#d32f2f{% elif exp.analysis_result.efficiency_decay_pct > 15 %}#f57c00{% else %}#388e3c{% endif %};">
+                                    {{ exp.analysis_result.efficiency_decay_pct }}%
+                                </span>
+                                {% else %}-{% endif %}
+                            </td>
+                            <td class="text-center">
+                                {% if exp.analysis_result and exp.analysis_result.anomaly_flags %}
+                                <span class="status-tag abnormal">⚠ {{ exp.analysis_result.anomaly_flags|length }}</span>
+                                {% else %}
+                                <span class="status-tag valid">正常</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-center muted"><small>{{ exp.created_at.strftime('%Y-%m-%d %H:%M') }}</small></td>
+                            <td class="text-center">
+                                <button class="btn-link" onclick="viewLaborExperiment({{ exp.id }})">查看分析</button>
+                                <button class="btn-link" onclick="editLaborExperiment({{ exp.id }})">编辑</button>
+                                <form action="/labor-experiments/{{ exp.id }}/delete" method="post" style="display:inline;" onsubmit="return confirm('确定删除此实验记录？');">
+                                    <button type="submit" class="btn-link-danger" style="padding:4px 8px;">删除</button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <div class="empty-state">
+                    <p class="empty-text">暂无劳作负荷实验记录，请先录入实验数据。</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div id="tab-charts" class="tab-content">
+        <div class="panel">
+            <div class="panel-header">
+                <h3>效率曲线与指标可视化</h3>
+                <div style="display:flex; gap:8px; align-items:center;">
+                    <label style="font-size:13px; color:#888;">选择古井:</label>
+                    <select id="chart-well" onchange="loadChartsData()" style="padding:6px 10px; border-radius:6px; border:1px solid #ccc;">
+                        <option value="">全部</option>
+                        {% for w in wells %}
+                        <option value="{{ w.id }}">{{ w.name }}</option>
+                        {% endfor %}
+                    </select>
+                    <label style="font-size:13px; color:#888;">实验:</label>
+                    <select id="chart-exp" onchange="renderLaborCharts()" style="padding:6px 10px; border-radius:6px; border:1px solid #ccc;">
+                        <option value="">请先选择古井</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="stats-grid" id="labor-stats" style="margin-bottom:24px;">
+                <div class="stat-card"><span class="stat-label">总出水量</span><span class="stat-value" id="s-water">0.00</span><span class="stat-unit">L</span></div>
+                <div class="stat-card"><span class="stat-label">平均出水量</span><span class="stat-value" id="s-avg-flow">0.00</span><span class="stat-unit">L/min</span></div>
+                <div class="stat-card primary"><span class="stat-label">人均出水量</span><span class="stat-value" id="s-per-capita">0.00</span><span class="stat-unit">L/min/人</span></div>
+                <div class="stat-card"><span class="stat-label">峰值效率</span><span class="stat-value" id="s-peak">0.00</span><span class="stat-unit">L/min</span></div>
+                <div class="stat-card"><span class="stat-label">峰值持续</span><span class="stat-value" id="s-peak-dur">0.00</span><span class="stat-unit">min</span></div>
+                <div class="stat-card"><span class="stat-label">效率衰减</span><span class="stat-value" id="s-decay">0.00</span><span class="stat-unit">%</span></div>
+            </div>
+
+            <div id="labor-charts-empty" class="empty-state small">
+                <p class="empty-text">请选择实验以查看分析图表。</p>
+            </div>
+            <div id="labor-charts-container" style="display:none;">
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:24px; margin-bottom:24px;">
+                    <div class="panel" style="margin:0;">
+                        <div class="panel-header"><h3>📈 连续作业效率变化曲线</h3></div>
+                        <div id="efficiency-curve-chart" class="chart-container" style="height:380px;"></div>
+                    </div>
+                    <div class="panel" style="margin:0;">
+                        <div class="panel-header"><h3>💧 累计出水量曲线</h3></div>
+                        <div id="cumulative-water-chart" class="chart-container" style="height:380px;"></div>
+                    </div>
+                </div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:24px; margin-bottom:24px;">
+                    <div class="panel" style="margin:0;">
+                        <div class="panel-header"><h3>😓 疲劳等级与效率关联</h3></div>
+                        <div id="fatigue-chart" class="chart-container" style="height:380px;"></div>
+                    </div>
+                    <div class="panel" style="margin:0;">
+                        <div class="panel-header"><h3>📊 效率稳定性分析（变异系数CV）</h3></div>
+                        <div id="stability-chart" class="chart-container" style="height:380px;"></div>
+                    </div>
+                </div>
+                <div class="panel" style="margin-bottom:24px;">
+                    <div class="panel-header"><h3>⚠️ 异常波动标记</h3></div>
+                    <div id="anomaly-list"></div>
+                </div>
+                <div class="panel">
+                    <div class="panel-header"><h3>📝 研究结论自动生成</h3></div>
+                    <div id="research-conclusion" class="form-panel" style="background:#FFFBF5; line-height:1.8;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="tab-compare" class="tab-content">
+        <div class="panel">
+            <div class="panel-header">
+                <h3>多轮实验对比与协同增益研究</h3>
+            </div>
+
+            <div class="form-panel compact" style="margin-bottom:24px;">
+                <h4 style="margin:0 0 16px 0;">🔬 创建对比组</h4>
+                <div class="form-row two-col">
+                    <label class="form-group">
+                        <span class="form-label">选择古井 <em>*</em></span>
+                        <select id="cmp-well" required onchange="loadAvailableExperiments()">
+                            <option value="">-- 请选择古井 --</option>
+                            {% for w in wells %}
+                            <option value="{{ w.id }}">{{ w.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </label>
+                    <label class="form-group">
+                        <span class="form-label">对比组名称 <em>*</em></span>
+                        <input type="text" id="cmp-name" maxlength="200" placeholder="如：1人vs2人vs3人 协同效率对比">
+                    </label>
+                </div>
+                <div class="form-row">
+                    <label class="form-group">
+                        <span class="form-label">对比组说明</span>
+                        <textarea id="cmp-desc" rows="2" maxlength="2000" placeholder="说明对比的变量、研究目的等..."></textarea>
+                    </label>
+                </div>
+                <div class="form-row">
+                    <label class="form-group full-width">
+                        <span class="form-label">选择对比实验（至少2个） <em>*</em></span>
+                        <div id="available-exps" style="border:1px solid #E8DFD0; border-radius:8px; padding:12px; max-height:200px; overflow-y:auto; background:#FFFBF5;">
+                            <p class="muted" style="margin:0; font-size:13px;">请先选择古井以加载可用实验</p>
+                        </div>
+                    </label>
+                </div>
+                <div id="cmp-error" class="error-msg hidden"></div>
+                <div class="form-actions" style="margin-top:12px;">
+                    <button type="button" class="btn-primary" onclick="createComparisonGroup()">✅ 创建对比组并分析</button>
+                </div>
+            </div>
+
+            <div id="comparison-result" style="display:none;"></div>
+
+            <div id="comparison-groups-list" style="margin-top:32px;">
+                <h4 style="margin:0 0 16px 0;">📁 历史对比组</h4>
+                {% if comparison_groups %}
+                <div class="table-wrapper">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>对比组名称</th>
+                                <th>古井</th>
+                                <th>实验数量</th>
+                                <th>说明</th>
+                                <th>创建时间</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for g in comparison_groups %}
+                            <tr>
+                                <td><strong>{{ g.group_name }}</strong></td>
+                                <td class="text-center">
+                                    {% for w in wells %}
+                                    {% if w.id == g.well_id %}{{ w.name }}{% endif %}
+                                    {% endfor %}
+                                </td>
+                                <td class="text-center">{{ g.items|length }}</td>
+                                <td class="muted" style="max-width:300px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ g.description or '-' }}</td>
+                                <td class="text-center muted"><small>{{ g.created_at.strftime('%Y-%m-%d %H:%M') }}</small></td>
+                                <td class="text-center">
+                                    <button class="btn-link" onclick="viewComparisonGroup({{ g.id }})">查看分析</button>
+                                    <form action="/labor-comparisons/{{ g.id }}/delete" method="post" style="display:inline;" onsubmit="return confirm('确定删除此对比组？');">
+                                        <button type="submit" class="btn-link-danger" style="padding:4px 8px;">删除</button>
+                                    </form>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="empty-state small">
+                    <p class="empty-text">暂无历史对比组。</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal-overlay" id="labor-edit-modal">
+    <div class="modal" style="max-width:800px;">
+        <div class="modal-header">
+            <h3>编辑劳作实验数据</h3>
+            <button class="btn-close" onclick="closeModal('labor-edit-modal')">×</button>
+        </div>
+        <div id="labor-edit-content"></div>
+    </div>
+</div>
+
+<div class="modal-overlay" id="labor-view-modal">
+    <div class="modal" style="max-width:1100px;">
+        <div class="modal-header">
+            <h3>实验分析详情</h3>
+            <button class="btn-close" onclick="closeModal('labor-view-modal')">×</button>
+        </div>
+        <div id="labor-view-content" style="padding:20px;"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            this.classList.add('active');
+            document.getElementById(this.dataset.tab).classList.add('active');
+        });
+    });
+
+    initLaborTimePoints();
+
+    document.getElementById('labor-exp-form').addEventListener('submit', function(e) {
+        e.preventDefault();
+        submitLaborExperiment();
+    });
+});
+
+let laborTpCount = 0;
+
+function initLaborTimePoints() {
+    const container = document.getElementById('labor-tp-container');
+    container.innerHTML = '';
+    laborTpCount = 0;
+    for (let i = 0; i < 5; i++) {
+        addLaborTimePoint(true);
+    }
+}
+
+function addLaborTimePoint(isInit=false) {
+    const container = document.getElementById('labor-tp-container');
+    const idx = laborTpCount++;
+    const row = document.createElement('div');
+    row.className = 'labor-tp-row';
+    row.style.cssText = 'display:flex; gap:12px; align-items:center; padding:8px 0; border-bottom:1px dashed #E8DFD0;';
+    row.innerHTML = `
+        <span style="width:32px; text-align:center; font-weight:600; color:#8B4513;">${idx + 1}</span>
+        <input type="number" step="0.5" min="0" class="ltp-elapsed" placeholder="累计时间(min)" style="flex:1; padding:8px; border:1px solid #ccc; border-radius:6px;" ${isInit && idx < 2 ? 'required' : ''}>
+        <input type="number" step="0.1" min="0" class="ltp-water" placeholder="累计出水量(L)" style="flex:1; padding:8px; border:1px solid #ccc; border-radius:6px;" ${isInit && idx < 2 ? 'required' : ''}>
+        <input type="number" step="0.1" min="0" max="1" class="ltp-fatigue" placeholder="疲劳度(0~1)" value="0" style="width:120px; padding:8px; border:1px solid #ccc; border-radius:6px;">
+        <input type="number" step="1" min="0" class="ltp-rotation" placeholder="轮班次" value="0" style="width:80px; padding:8px; border:1px solid #ccc; border-radius:6px;">
+        <label style="display:flex; align-items:center; gap:4px; min-width:72px; font-size:13px; color:#666;">
+            <input type="checkbox" class="ltp-rest"> 休息
+        </label>
+        <button type="button" class="btn-icon" onclick="this.parentElement.remove(); reindexLaborTp();" title="删除" ${laborTpCount <= 4 ? 'disabled style="opacity:0.3; cursor:not-allowed;"' : ''}>✕</button>
+    `;
+    container.appendChild(row);
+    reindexLaborTp();
+}
+
+function addLaborRestPoint() {
+    addLaborTimePoint();
+    const rows = document.querySelectorAll('.labor-tp-row');
+    const lastRow = rows[rows.length - 1];
+    const lastElapsed = parseFloat(rows[rows.length - 2].querySelector('.ltp-elapsed').value) || 0;
+    lastRow.querySelector('.ltp-elapsed').value = (lastElapsed + 5).toFixed(1);
+    lastRow.querySelector('.ltp-water').value = lastElapsed > 0 ? rows[rows.length - 2].querySelector('.ltp-water').value : 0;
+    lastRow.querySelector('.ltp-rest').checked = true;
+    lastRow.querySelector('.ltp-fatigue').value = 0;
+}
+
+function reindexLaborTp() {
+    const rows = document.querySelectorAll('.labor-tp-row');
+    rows.forEach((row, i) => {
+        row.querySelector('span:first-child').textContent = i + 1;
+        const delBtn = row.querySelector('.btn-icon');
+        if (rows.length <= 3) {
+            delBtn.disabled = true;
+            delBtn.style.opacity = '0.3';
+            delBtn.style.cursor = 'not-allowed';
+        } else {
+            delBtn.disabled = false;
+            delBtn.style.opacity = '1';
+            delBtn.style.cursor = 'pointer';
+        }
+    });
+}
+
+function generateSampleData() {
+    const workers = parseInt(document.getElementById('f-workers').value) || 1;
+    const duration = parseFloat(document.getElementById('f-duration').value) || 30;
+    const fatigue = parseFloat(document.getElementById('f-fatigue').value) || 0.1;
+    const points = Math.min(12, Math.max(5, Math.floor(duration / 5) + 1));
+
+    const container = document.getElementById('labor-tp-container');
+    container.innerHTML = '';
+    laborTpCount = 0;
+
+    let water = 0;
+    let baseRate = 15 * workers;
+    for (let i = 0; i < points; i++) {
+        addLaborTimePoint(true);
+        const rows = container.querySelectorAll('.labor-tp-row');
+        const row = rows[rows.length - 1];
+        const elapsed = (duration * i / (points - 1)).toFixed(1);
+        const decayFactor = 1 - fatigue * (i / (points - 1));
+        const intervalWater = baseRate * decayFactor * (duration / (points - 1)) * (0.85 + Math.random() * 0.3);
+        water += intervalWater;
+
+        row.querySelector('.ltp-elapsed').value = elapsed;
+        row.querySelector('.ltp-water').value = water.toFixed(1);
+        row.querySelector('.ltp-fatigue').value = (fatigue * i / (points - 1)).toFixed(2);
+        row.querySelector('.ltp-rotation').value = Math.floor(i / 3);
+    }
+    showToast('已填充示例数据，可手动调整', 'success');
+}
+
+function loadConfigsForWell() {
+    const wellId = document.getElementById('f-well').value;
+    const configSel = document.getElementById('f-config');
+    configSel.innerHTML = '<option value="">不关联结构参数</option>';
+    if (!wellId) return;
+    fetch(`/api/wells/${wellId}/comparison`)
+        .then(r => r.json())
+        .then(data => {
+            (data.configs || []).forEach(c => {
+                configSel.innerHTML += `<option value="${c.config_id}">v${c.version} 井深${c.well_depth_m}m/桶${c.bucket_capacity_l}L</option>`;
+            });
+        });
+}
+
+function resetLaborForm() {
+    initLaborTimePoints();
+    document.getElementById('labor-form-error').classList.add('hidden');
+}
+
+function validateAndCollectLaborData() {
+    const wellId = parseInt(document.getElementById('f-well').value);
+    const configId = parseInt(document.getElementById('f-config').value) || null;
+    const name = document.getElementById('f-name').value.trim();
+    const mode = document.getElementById('f-mode').value;
+    const workers = parseInt(document.getElementById('f-workers').value);
+    const duration = parseFloat(document.getElementById('f-duration').value);
+    const rest = parseFloat(document.getElementById('f-rest').value) || 0;
+    const fatigue = parseFloat(document.getElementById('f-fatigue').value) || 0;
+    const notes = document.getElementById('f-notes').value.trim();
+
+    if (!wellId) return { error: '请选择古井' };
+    if (!name) return { error: '请输入实验名称' };
+    if (!workers || workers < 1) return { error: '参与人数必须≥1' };
+    if (!duration || duration <= 0) return { error: '连续作业时长必须>0' };
+
+    const rows = document.querySelectorAll('.labor-tp-row');
+    if (rows.length < 3) return { error: '至少需要3个时间点' };
+
+    const time_points = [];
+    let lastElapsed = -1;
+    let lastWater = -1;
+    for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        const e = parseFloat(row.querySelector('.ltp-elapsed').value);
+        const w = parseFloat(row.querySelector('.ltp-water').value);
+        const f = parseFloat(row.querySelector('.ltp-fatigue').value) || 0;
+        const r = parseInt(row.querySelector('.ltp-rotation').value) || 0;
+        const isRest = row.querySelector('.ltp-rest').checked;
+
+        if (isNaN(e) || isNaN(w)) return { error: `第${i + 1}个时间点数据不完整` };
+        if (e <= lastElapsed) return { error: `第${i + 1}个时间点的时间必须大于前一个` };
+        if (w < lastWater) return { error: `第${i + 1}个时间点的累计出水量不能减少` };
+        if (f < 0 || f > 1) return { error: `第${i + 1}个时间点的疲劳度必须在0~1之间` };
+
+        lastElapsed = e;
+        lastWater = w;
+        time_points.push({
+            point_index: i,
+            elapsed_min: e,
+            total_water_l: w,
+            worker_rotation: r,
+            fatigue_level: f,
+            is_rest_period: isRest
+        });
+    }
+
+    return {
+        error: null,
+        payload: {
+            experiment_name: name,
+            worker_count: workers,
+            work_mode: mode,
+            continuous_duration_min: duration,
+            rest_interval_min: rest,
+            fatigue_factor: fatigue,
+            notes: notes,
+            config_id: configId,
+            time_points: time_points
+        }
+    };
+}
+
+function submitLaborExperiment() {
+    const result = validateAndCollectLaborData();
+    const errDiv = document.getElementById('labor-form-error');
+    if (result.error) {
+        errDiv.textContent = result.error;
+        errDiv.classList.remove('hidden');
+        showToast(result.error, 'error');
+        return;
+    }
+    errDiv.classList.add('hidden');
+
+    const wellId = parseInt(document.getElementById('f-well').value);
+    const btn = document.getElementById('submit-labor-btn');
+    btn.disabled = true;
+    btn.textContent = '提交中...';
+
+    fetch(`/wells/${wellId}/labor-experiments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(result.payload)
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            showToast('实验记录创建成功，分析已完成', 'success');
+            setTimeout(() => location.reload(), 800);
+        } else {
+            errDiv.textContent = data.error || '提交失败';
+            errDiv.classList.remove('hidden');
+            showToast(data.error || '提交失败', 'error');
+            btn.disabled = false;
+            btn.textContent = '💾 提交并计算分析';
+        }
+    })
+    .catch(err => {
+        errDiv.textContent = '网络错误';
+        errDiv.classList.remove('hidden');
+        showToast('网络错误', 'error');
+        btn.disabled = false;
+        btn.textContent = '💾 提交并计算分析';
+    });
+}
+
+function filterLaborExperiments() {
+    const wid = document.getElementById('filter-well').value;
+    document.querySelectorAll('#labor-exp-list tbody tr').forEach(row => {
+        if (!wid) { row.style.display = ''; return; }
+        const cells = row.querySelectorAll('td');
+        if (cells.length >= 2) {
+            const wellCell = cells[1].textContent.trim();
+            const matchingWell = document.querySelector(`#filter-well option[value="${wid}"]`);
+            if (matchingWell && wellCell === matchingWell.textContent.trim()) {
+                row.style.display = '';
+            } else {
+                row.style.display = 'none';
+            }
+        }
+    });
+}
+
+let _laborExpCache = null;
+
+function loadChartsData() {
+    const wid = document.getElementById('chart-well').value;
+    const expSel = document.getElementById('chart-exp');
+    expSel.innerHTML = '<option value="">-- 请选择实验 --</option>';
+    document.getElementById('labor-charts-empty').style.display = '';
+    document.getElementById('labor-charts-container').style.display = 'none';
+
+    if (!wid) return;
+
+    fetch(`/api/wells/${wid}/labor-experiments`)
+        .then(r => r.json())
+        .then(data => {
+            _laborExpCache = data.experiments;
+            data.experiments.forEach(exp => {
+                expSel.innerHTML += `<option value="${exp.id}">${exp.experiment_name} (${exp.worker_count}人/${exp.work_mode})</option>`;
+            });
+        });
+}
+
+function renderLaborCharts() {
+    const expId = document.getElementById('chart-exp').value;
+    if (!expId || !_laborExpCache) return;
+
+    const exp = _laborExpCache.find(e => e.id == expId);
+    if (!exp) return;
+
+    const analysis = exp.analysis_result || {};
+    const tps = exp.time_points || [];
+    const flows = exp.instantaneous_flows || [];
+    const anomalies = exp.anomaly_list || [];
+
+    document.getElementById('s-water').textContent = analysis.total_water_l ? analysis.total_water_l.toFixed(1) : '0.00';
+    document.getElementById('s-avg-flow').textContent = analysis.avg_flow_rate_lpm ? analysis.avg_flow_rate_lpm.toFixed(2) : '0.00';
+    document.getElementById('s-per-capita').textContent = analysis.per_capita_flow_lpm ? analysis.per_capita_flow_lpm.toFixed(2) : '0.00';
+    document.getElementById('s-peak').textContent = analysis.peak_flow_rate_lpm ? analysis.peak_flow_rate_lpm.toFixed(2) : '0.00';
+    document.getElementById('s-peak-dur').textContent = analysis.peak_duration_min ? analysis.peak_duration_min.toFixed(1) : '0.00';
+    document.getElementById('s-decay').textContent = analysis.efficiency_decay_pct !== undefined ? analysis.efficiency_decay_pct.toFixed(1) : '0.00';
+
+    document.getElementById('labor-charts-empty').style.display = 'none';
+    document.getElementById('labor-charts-container').style.display = 'block';
+
+    const colors = { primary: '#8B4513', secondary: '#2F4F4F', accent: '#B8860B', danger: '#d32f2f', success: '#388e3c', fatigue: '#7B3F00' };
+
+    const restShapes = [];
+    const restAnnotations = [];
+    tps.forEach((tp, i) => {
+        if (tp.is_rest_period && i > 0) {
+            const prevT = tps[i-1].elapsed_min;
+            restShapes.push({
+                type: 'rect', x0: prevT, x1: tp.elapsed_min, y0: 0, y1: 1, yref: 'paper',
+                fillcolor: 'rgba(180, 180, 180, 0.25)', line: { width: 0 }, layer: 'below'
+            });
+            restAnnotations.push({
+                x: (prevT + tp.elapsed_min) / 2, y: 0.98, yref: 'paper',
+                text: '⏸休息', showarrow: false, font: { size: 11, color: '#666' }
+            });
+        }
+    });
+
+    Plotly.newPlot('efficiency-curve-chart', [{
+        x: tps.map(t => t.elapsed_min),
+        y: flows,
+        mode: 'lines+markers',
+        name: '瞬时出水量',
+        line: { color: colors.primary, width: 3 },
+        marker: { size: 7, color: colors.primary },
+        fill: 'tozeroy',
+        fillcolor: 'rgba(139, 69, 19, 0.12)'
+    }, {
+        x: [analysis.peak_start_min, analysis.peak_start_min + (analysis.peak_duration_min || 0)],
+        y: [analysis.peak_flow_rate_lpm, analysis.peak_flow_rate_lpm],
+        mode: 'lines',
+        name: '峰值区间',
+        line: { color: colors.accent, width: 4, dash: 'dash' }
+    }], {
+        title: { text: `瞬时出水量效率曲线 — ${exp.experiment_name}`, font: { family: 'Noto Serif SC', size: 15, color: '#5C4033' } },
+        xaxis: { title: '时间 (min)', gridcolor: '#E8DFD0' },
+        yaxis: { title: '出水量 (L/min)', gridcolor: '#E8DFD0' },
+        shapes: restShapes,
+        annotations: restAnnotations,
+        paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: '#FFFBF5',
+        legend: { orientation: 'h', y: -0.2 },
+        margin: { l: 60, r: 30, t: 60, b: 80 }, font: { family: 'Noto Sans SC' }
+    }, { responsive: true });
+
+    Plotly.newPlot('cumulative-water-chart', [{
+        x: tps.map(t => t.elapsed_min),
+        y: tps.map(t => t.total_water_l),
+        mode: 'lines+markers',
+        name: '累计出水量',
+        line: { color: colors.secondary, width: 3, shape: 'spline' },
+        marker: { size: 7, color: colors.secondary },
+        fill: 'tozeroy',
+        fillcolor: 'rgba(47, 79, 79, 0.10)'
+    }], {
+        title: { text: '累计出水量增长曲线', font: { family: 'Noto Serif SC', size: 15, color: '#5C4033' } },
+        xaxis: { title: '时间 (min)', gridcolor: '#E8DFD0' },
+        yaxis: { title: '累计水量 (L)', gridcolor: '#E8DFD0' },
+        shapes: restShapes,
+        paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: '#FFFBF5',
+        legend: { orientation: 'h', y: -0.2 },
+        margin: { l: 60, r: 30, t: 60, b: 80 }, font: { family: 'Noto Sans SC' }
+    }, { responsive: true });
+
+    Plotly.newPlot('fatigue-chart', [{
+        x: tps.map(t => t.elapsed_min),
+        y: flows,
+        type: 'scatter', mode: 'lines', name: '出水量(L/min)',
+        line: { color: colors.primary, width: 2.5 },
+        yaxis: 'y'
+    }, {
+        x: tps.map(t => t.elapsed_min),
+        y: tps.map(t => (t.fatigue_level || 0) * 100),
+        type: 'scatter', mode: 'lines+markers', name: '疲劳度(%)',
+        line: { color: colors.fatigue, width: 2, dash: 'dot' },
+        marker: { size: 6, color: colors.fatigue },
+        yaxis: 'y2'
+    }], {
+        title: { text: `疲劳等级与效率关联（相关系数: ${analysis.fatigue_correlation || 0}）`, font: { family: 'Noto Serif SC', size: 15, color: '#5C4033' } },
+        xaxis: { title: '时间 (min)', gridcolor: '#E8DFD0' },
+        yaxis: { title: '出水量 (L/min)', gridcolor: '#E8DFD0', side: 'left' },
+        yaxis2: { title: '疲劳度 (%)', overlaying: 'y', side: 'right', showgrid: false, range: [0, 100] },
+        paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: '#FFFBF5',
+        legend: { orientation: 'h', y: -0.2 },
+        margin: { l: 60, r: 60, t: 60, b: 80 }, font: { family: 'Noto Sans SC' }
+    }, { responsive: true });
+
+    const cv = analysis.stability_cv || 0;
+    const cvColor = cv < 10 ? colors.success : cv < 25 ? colors.accent : colors.danger;
+    const cvLabel = cv < 10 ? '优秀稳定性' : cv < 25 ? '一般稳定性' : '波动性较大';
+
+    Plotly.newPlot('stability-chart', [{
+        type: 'bar', orientation: 'h',
+        x: [analysis.stability_cv || 0, 15, 30, 50],
+        y: ['本次实验', '行业参考-优', '行业参考-中', '行业参考-差'],
+        marker: { color: [cvColor, '#ccc', '#ccc', '#ccc'] },
+        text: [cv.toFixed(1) + '% — ' + cvLabel, '10%以下为优', '25%以下为中', '>25%波动大'],
+        textposition: 'auto',
+    }], {
+        title: { text: `稳定性变异系数 CV = ${cv.toFixed(1)}%`, font: { family: 'Noto Serif SC', size: 15, color: '#5C4033' } },
+        xaxis: { title: '变异系数 CV (%)', gridcolor: '#E8DFD0' },
+        paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: '#FFFBF5',
+        margin: { l: 120, r: 30, t: 60, b: 40 }, font: { family: 'Noto Sans SC' },
+        showlegend: false
+    }, { responsive: true });
+
+    const anomalyDiv = document.getElementById('anomaly-list');
+    if (anomalies.length === 0) {
+        anomalyDiv.innerHTML = `<div style="padding:16px; background:rgba(56, 142, 60, 0.08); color:${colors.success}; border-radius:6px; font-size:14px;">
+            ✅ 未检测到显著异常波动，数据质量良好
+        </div>`;
+    } else {
+        let html = `<div style="padding:12px; background:rgba(211, 47, 47, 0.08); color:${colors.danger}; border-radius:6px; margin-bottom:12px; font-size:14px;">
+            ⚠️ 检测到 <strong>${anomalies.length}</strong> 处异常波动，建议人工复核
+        </div><table class="data-table" style="font-size:13px;"><thead><tr>
+            <th>时间点</th><th>类型</th><th>瞬时出水量</th><th>偏离程度</th><th>说明</th>
+        </tr></thead><tbody>`;
+        anomalies.forEach(a => {
+            const typeLabel = a.type === 'flow_spike' ? '异常升高' : a.type === 'flow_drop' ? '异常降低' : '水量下降';
+            const typeColor = a.type === 'flow_spike' ? colors.accent : colors.danger;
+            html += `<tr>
+                <td class="text-center">${a.elapsed_min} min</td>
+                <td class="text-center"><span style="color:${typeColor}; font-weight:600;">${typeLabel}</span></td>
+                <td class="text-center">${a.flow_lpm} L/min</td>
+                <td class="text-center">${a.z_score ? a.z_score + 'σ' : '-'}</td>
+                <td>${a.description}</td>
+            </tr>`;
+        });
+        html += '</tbody></table>';
+        anomalyDiv.innerHTML = html;
+    }
+
+    generateResearchConclusion(exp, analysis);
+}
+
+function generateResearchConclusion(exp, analysis) {
+    const el = document.getElementById('research-conclusion');
+    const decay = analysis.efficiency_decay_pct || 0;
+    const cv = analysis.stability_cv || 0;
+    const pc = analysis.per_capita_flow_lpm || 0;
+    const wc = analysis.work_rest_ratio || 0;
+    const peakDur = analysis.peak_duration_min || 0;
+    const dur = exp.continuous_duration_min || 1;
+    const peakPct = (peakDur / dur * 100).toFixed(1);
+
+    let rating = [];
+    if (pc > 12) rating.push({ text: '人均出水量优秀', color: '#388e3c' });
+    else if (pc > 8) rating.push({ text: '人均出水量良好', color: '#795548' });
+    else rating.push({ text: '人均出水量偏低', color: '#d32f2f' });
+
+    if (decay < 10) rating.push({ text: '抗衰减能力强', color: '#388e3c' });
+    else if (decay < 25) rating.push({ text: '抗衰减能力一般', color: '#795548' });
+    else rating.push({ text: '疲劳衰减明显', color: '#d32f2f' });
+
+    if (cv < 10) rating.push({ text: '作业稳定性极佳', color: '#388e3c' });
+    else if (cv < 25) rating.push({ text: '作业稳定性一般', color: '#795548' });
+    else rating.push({ text: '波动较大需改进', color: '#d32f2f' });
+
+    if (peakPct > 50) rating.push({ text: '高效作业时间充足', color: '#388e3c' });
+    else if (peakPct > 25) rating.push({ text: '高效作业时间中等', color: '#795548' });
+    else rating.push({ text: '峰值持续较短', color: '#d32f2f' });
+
+    const ratingBadges = rating.map(r => `<span style="display:inline-block; padding:4px 12px; margin:4px 6px 4px 0; border-radius:20px; background:${r.color}15; color:${r.color}; font-weight:600; font-size:13px;">★ ${r.text}</span>`).join('');
+
+    let recommendations = [];
+    if (decay > 20) recommendations.push(`• 建议缩短连续作业时长至${Math.round(dur * 0.7)}分钟以内，或引入强制休息机制`);
+    if (cv > 20) recommendations.push('• 建议优化分工节奏，统一动作标准，减少人为波动');
+    if (exp.worker_count === 1 && dur > 20) recommendations.push('• 单人长时间作业衰减显著，建议考虑双人轮流模式');
+    if (exp.rest_interval_min === 0 && decay > 15) recommendations.push(`• 当前无休息安排，建议每${Math.max(10, Math.round(dur * 0.3))}分钟安排2~3分钟恢复时间`);
+    if (wc > 0 && wc < 4) recommendations.push(`• 当前劳作/休息比${wc}:1偏低，可适当提升作业密度`);
+    if (recommendations.length === 0) recommendations.push('• 当前参数配置合理，建议保持现有作业模式');
+
+    const fatigueCorr = analysis.fatigue_correlation || 0;
+    let fatigueNote = '';
+    if (fatigueCorr < -0.6) fatigueNote = `疲劳与效率呈<strong style="color:#d32f2f;">强负相关(${fatigueCorr.toFixed(2)})</strong>，疲劳是效率下降的主因`;
+    else if (fatigueCorr < -0.3) fatigueNote = `疲劳与效率呈<strong>中度负相关(${fatigueCorr.toFixed(2)})</strong>，体力下降对效率有明显影响`;
+    else if (fatigueCorr > -0.15) fatigueNote = `疲劳与效率关联较弱(${fatigueCorr.toFixed(2)})，效率下降更多来自节奏波动`;
+    else fatigueNote = `疲劳与效率有一定负相关(${fatigueCorr.toFixed(2)})`;
+
+    el.innerHTML = `
+        <div style="margin-bottom:16px;">${ratingBadges}</div>
+        <div style="background:linear-gradient(135deg, #FFFBF5 0%, #FFF8E8 100%); padding:16px 20px; border-radius:8px; border-left:4px solid #8B4513; margin-bottom:16px;">
+            <strong style="font-size:16px; color:#5C4033;">📊 核心指标摘要</strong>
+            <div style="margin-top:12px; display:grid; grid-template-columns:repeat(auto-fit, minmax(180px,1fr)); gap:12px; font-size:14px;">
+                <div>👥 作业模式：<strong>${exp.worker_count}人 ${exp.work_mode}</strong></div>
+                <div>⏱ 连续时长：<strong>${dur} 分钟</strong></div>
+                <div>💧 总出水量：<strong>${analysis.total_water_l?.toFixed(1) || 0} L</strong></div>
+                <div>⚡ 平均效率：<strong>${analysis.avg_flow_rate_lpm?.toFixed(2) || 0} L/min</strong></div>
+                <div>👤 人均效率：<strong style="color:#8B4513;">${pc.toFixed(2)} L/min/人</strong></div>
+                <div>📉 效率衰减：<strong>${decay.toFixed(1)}%</strong></div>
+                <div>🎯 峰值效率：<strong>${analysis.peak_flow_rate_lpm?.toFixed(2) || 0} L/min</strong></div>
+                <div>🔥 峰值持续：<strong>${peakDur.toFixed(1)}分钟 (${peakPct}%)</strong></div>
+                <div>🎯 稳定性CV：<strong>${cv.toFixed(1)}%</strong></div>
+                <div>⚖️ 劳/休比：<strong>${wc >= 99 ? '无休' : wc + ':1'}</strong></div>
+            </div>
+        </div>
+        <div style="margin-bottom:16px; font-size:14px; line-height:2;">
+            <strong style="color:#5C4033;">🔬 相关性分析：</strong>${fatigueNote}
+        </div>
+        <div style="background:rgba(139, 69, 19, 0.06); padding:16px 20px; border-radius:8px; font-size:14px; line-height:1.9;">
+            <strong style="color:#5C4033; font-size:15px;">💡 优化建议</strong>
+            <div style="margin-top:10px;">${recommendations.join('<br>')}</div>
+        </div>
+    `;
+}
+
+function viewLaborExperiment(expId) {
+    const modal = document.getElementById('labor-view-modal');
+    const content = document.getElementById('labor-view-content');
+    modal.classList.add('show');
+    content.innerHTML = '<div class="empty-state small"><p class="empty-text">加载中...</p></div>';
+
+    fetch(`/api/labor-experiments/${expId}`)
+        .then(r => r.json())
+        .then(exp => {
+            document.getElementById('chart-well').value = exp.well_id;
+            loadChartsData();
+            setTimeout(() => {
+                document.getElementById('chart-exp').value = expId;
+                const cache = [{ ...exp }];
+                _laborExpCache = cache;
+                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                document.querySelector('.tab-btn[data-tab="tab-charts"]').classList.add('active');
+                document.getElementById('tab-charts').classList.add('active');
+                renderLaborCharts();
+                closeModal('labor-view-modal');
+            }, 300);
+        });
+}
+
+function editLaborExperiment(expId) {
+    const modal = document.getElementById('labor-edit-modal');
+    const content = document.getElementById('labor-edit-content');
+    modal.classList.add('show');
+    content.innerHTML = '<div class="empty-state small"><p class="empty-text">加载中...</p></div>';
+
+    fetch(`/api/labor-experiments/${expId}`)
+        .then(r => r.json())
+        .then(exp => {
+            let tpsHtml = '';
+            exp.time_points.forEach((tp, i) => {
+                tpsHtml += `<div class="labor-tp-row" style="display:flex; gap:10px; align-items:center; padding:6px 0; border-bottom:1px dashed #E8DFD0;">
+                    <span style="width:28px; text-align:center; font-weight:600; color:#8B4513;">${i+1}</span>
+                    <input type="number" step="0.5" min="0" class="etp-elapsed" value="${tp.elapsed_min}" style="flex:1; padding:6px; border:1px solid #ccc; border-radius:6px;">
+                    <input type="number" step="0.1" min="0" class="etp-water" value="${tp.total_water_l}" style="flex:1; padding:6px; border:1px solid #ccc; border-radius:6px;">
+                    <input type="number" step="0.1" min="0" max="1" class="etp-fatigue" value="${tp.fatigue_level}" style="width:90px; padding:6px; border:1px solid #ccc; border-radius:6px;">
+                    <label style="display:flex; align-items:center; gap:4px; min-width:60px; font-size:12px;">
+                        <input type="checkbox" class="etp-rest" ${tp.is_rest_period ? 'checked' : ''}> 休息
+                    </label>
+                    <button type="button" class="btn-icon remove-etp" title="删除" style="opacity:0.6;">✕</button>
+                </div>`;
+            });
+
+            content.innerHTML = `
+                <div style="padding:20px;">
+                    <div class="form-row two-col">
+                        <label class="form-group"><span class="form-label">实验名称</span><input type="text" id="e-name" value="${exp.experiment_name}" maxlength="200"></label>
+                        <label class="form-group"><span class="form-label">分工方式</span>
+                            <select id="e-mode">
+                                ${['单人独立','双人轮流','三人交替','多人协同','自定义'].map(m=>`<option value="${m}" ${m===exp.work_mode?'selected':''}>${m}</option>`).join('')}
+                            </select>
+                        </label>
+                    </div>
+                    <div class="form-row two-col">
+                        <label class="form-group"><span class="form-label">参与人数</span><input type="number" id="e-workers" min="1" value="${exp.worker_count}"></label>
+                        <label class="form-group"><span class="form-label">连续时长(min)</span><input type="number" id="e-duration" min="1" step="0.5" value="${exp.continuous_duration_min}"></label>
+                    </div>
+                    <div class="form-row two-col">
+                        <label class="form-group"><span class="form-label">休息间隔(min)</span><input type="number" id="e-rest" min="0" step="0.5" value="${exp.rest_interval_min}"></label>
+                        <label class="form-group"><span class="form-label">衰减系数(0~1)</span><input type="number" id="e-fatigue" min="0" max="1" step="0.01" value="${exp.fatigue_factor}"></label>
+                    </div>
+                    <div class="form-row">
+                        <label class="form-group"><span class="form-label">实验备注</span><textarea id="e-notes" rows="2" maxlength="5000">${exp.notes || ''}</textarea></label>
+                    </div>
+                    <div style="margin-bottom:10px; font-weight:600; color:#5C4033;">时间点数据：</div>
+                    <div id="edit-tp-container" style="border:1px solid #E8DFD0; border-radius:8px; padding:12px; max-height:280px; overflow-y:auto; background:#FFFBF5;">
+                        ${tpsHtml}
+                    </div>
+                    <div style="margin-top:10px;">
+                        <button type="button" class="btn-secondary" onclick="addEditTp()">+ 添加时间点</button>
+                    </div>
+                    <div id="edit-labor-error" class="error-msg hidden" style="margin-top:12px;"></div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn-secondary" onclick="closeModal('labor-edit-modal')">取消</button>
+                        <button type="button" class="btn-primary" onclick="saveLaborExperiment(${expId})">💾 保存修改并重新计算</button>
+                    </div>
+                </div>`;
+
+            content.querySelectorAll('.remove-etp').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    const rows = content.querySelectorAll('#edit-tp-container .labor-tp-row');
+                    if (rows.length > 3) this.parentElement.remove();
+                    else showToast('至少需要3个时间点', 'error');
+                });
+            });
+        });
+}
+
+function addEditTp() {
+    const container = document.querySelector('#edit-tp-container');
+    const rows = container.querySelectorAll('.labor-tp-row');
+    const idx = rows.length;
+    const lastElapsed = rows.length > 0 ? parseFloat(rows[rows.length-1].querySelector('.etp-elapsed').value) || 0 : 0;
+    const lastWater = rows.length > 0 ? parseFloat(rows[rows.length-1].querySelector('.etp-water').value) || 0 : 0;
+    const row = document.createElement('div');
+    row.className = 'labor-tp-row';
+    row.style.cssText = 'display:flex; gap:10px; align-items:center; padding:6px 0; border-bottom:1px dashed #E8DFD0;';
+    row.innerHTML = `
+        <span style="width:28px; text-align:center; font-weight:600; color:#8B4513;">${idx+1}</span>
+        <input type="number" step="0.5" min="0" class="etp-elapsed" value="${(lastElapsed + 5).toFixed(1)}" style="flex:1; padding:6px; border:1px solid #ccc; border-radius:6px;">
+        <input type="number" step="0.1" min="0" class="etp-water" value="${lastWater}" style="flex:1; padding:6px; border:1px solid #ccc; border-radius:6px;">
+        <input type="number" step="0.1" min="0" max="1" class="etp-fatigue" value="0" style="width:90px; padding:6px; border:1px solid #ccc; border-radius:6px;">
+        <label style="display:flex; align-items:center; gap:4px; min-width:60px; font-size:12px;">
+            <input type="checkbox" class="etp-rest"> 休息
+        </label>
+        <button type="button" class="btn-icon" onclick="this.parentElement.remove();" title="删除" style="opacity:0.6;">✕</button>`;
+    container.appendChild(row);
+}
+
+function saveLaborExperiment(expId) {
+    const content = document.getElementById('labor-edit-content');
+    const rows = content.querySelectorAll('#edit-tp-container .labor-tp-row');
+    const errDiv = document.getElementById('edit-labor-error');
+
+    if (rows.length < 3) { errDiv.textContent = '至少需要3个时间点'; errDiv.classList.remove('hidden'); return; }
+
+    const tps = [];
+    let lastE = -1, lastW = -1;
+    for (let i = 0; i < rows.length; i++) {
+        const e = parseFloat(rows[i].querySelector('.etp-elapsed').value);
+        const w = parseFloat(rows[i].querySelector('.etp-water').value);
+        const f = parseFloat(rows[i].querySelector('.etp-fatigue').value) || 0;
+        const r = rows[i].querySelector('.etp-rest').checked;
+        if (isNaN(e) || isNaN(w)) { errDiv.textContent = `第${i+1}个时间点数据不完整`; errDiv.classList.remove('hidden'); return; }
+        if (e <= lastE) { errDiv.textContent = `第${i+1}个时间点时间必须递增`; errDiv.classList.remove('hidden'); return; }
+        if (w < lastW) { errDiv.textContent = `第${i+1}个时间点累计水量不能减少`; errDiv.classList.remove('hidden'); return; }
+        lastE = e; lastW = w;
+        tps.push({ point_index: i, elapsed_min: e, total_water_l: w, worker_rotation: 0, fatigue_level: f, is_rest_period: r });
+    }
+
+    const payload = {
+        meta: {
+            experiment_name: document.getElementById('e-name').value,
+            worker_count: parseInt(document.getElementById('e-workers').value),
+            work_mode: document.getElementById('e-mode').value,
+            continuous_duration_min: parseFloat(document.getElementById('e-duration').value),
+            rest_interval_min: parseFloat(document.getElementById('e-rest').value) || 0,
+            fatigue_factor: parseFloat(document.getElementById('e-fatigue').value) || 0,
+            notes: document.getElementById('e-notes').value
+        },
+        time_points: tps
+    };
+
+    fetch(`/api/labor-experiments/${expId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            showToast('保存成功，分析已重新计算', 'success');
+            setTimeout(() => { closeModal('labor-edit-modal'); location.reload(); }, 600);
+        } else {
+            errDiv.textContent = data.error || '保存失败';
+            errDiv.classList.remove('hidden');
+            showToast(data.error || '保存失败', 'error');
+        }
+    })
+    .catch(err => { errDiv.textContent = '网络错误'; errDiv.classList.remove('hidden'); });
+}
+
+function loadAvailableExperiments() {
+    const wid = document.getElementById('cmp-well').value;
+    const container = document.getElementById('available-exps');
+    if (!wid) { container.innerHTML = '<p class="muted" style="margin:0; font-size:13px;">请先选择古井以加载可用实验</p>'; return; }
+    container.innerHTML = '<p class="muted" style="margin:0; font-size:13px;">加载中...</p>';
+
+    fetch(`/api/wells/${wid}/labor-experiments`)
+        .then(r => r.json())
+        .then(data => {
+            if (!data.experiments || data.experiments.length === 0) {
+                container.innerHTML = '<p class="muted" style="margin:0; font-size:13px; color:#d32f2f;">该古井暂无劳作实验，请先创建实验记录</p>';
+                return;
+            }
+            let html = '';
+            data.experiments.forEach(exp => {
+                const pc = exp.analysis_result ? exp.analysis_result.per_capita_flow_lpm.toFixed(2) : '-';
+                html += `<label style="display:flex; align-items:center; gap:10px; padding:10px; margin-bottom:6px; border-radius:6px; border:1px solid #E8DFD0; cursor:pointer; background:#fff;">
+                    <input type="checkbox" class="cmp-exp-item" value="${exp.id}" style="width:18px; height:18px;">
+                    <div style="flex:1;">
+                        <strong style="color:#5C4033;">${exp.experiment_name}</strong>
+                        <div style="font-size:12px; color:#888; margin-top:4px;">
+                            ${exp.worker_count}人 · ${exp.work_mode} · ${exp.continuous_duration_min}min · 人均${pc} L/min/人
+                        </div>
+                    </div>
+                </label>`;
+            });
+            html += `<p class="muted" style="margin:8px 0 0; font-size:12px;">共 ${data.experiments.length} 个实验，至少选择 2 个进行对比</p>`;
+            container.innerHTML = html;
+        })
+        .catch(err => {
+            container.innerHTML = '<p style="color:#d32f2f; margin:0; font-size:13px;">加载失败：' + err.message + '</p>';
+        });
+}
+
+function createComparisonGroup() {
+    const wid = document.getElementById('cmp-well').value;
+    const name = document.getElementById('cmp-name').value.trim();
+    const checked = document.querySelectorAll('.cmp-exp-item:checked');
+    const errDiv = document.getElementById('cmp-error');
+    errDiv.classList.add('hidden');
+
+    if (!wid) { errDiv.textContent = '请选择古井'; errDiv.classList.remove('hidden'); return; }
+    if (!name) { errDiv.textContent = '请输入对比组名称'; errDiv.classList.remove('hidden'); return; }
+    if (checked.length < 2) { errDiv.textContent = '至少需要选择 2 个实验进行对比'; errDiv.classList.remove('hidden'); return; }
+
+    const experiment_ids = Array.from(checked).map(c => parseInt(c.value));
+    const payload = {
+        group_name: name,
+        description: document.getElementById('cmp-desc').value.trim(),
+        experiment_ids: experiment_ids
+    };
+
+    fetch(`/api/wells/${wid}/labor-comparisons`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            showToast('对比组创建成功，已自动分析协同增益', 'success');
+            setTimeout(() => {
+                document.getElementById('cmp-name').value = '';
+                document.getElementById('cmp-desc').value = '';
+                document.querySelectorAll('.cmp-exp-item').forEach(c => c.checked = false);
+                loadComparisonGroups();
+                viewComparisonGroup(data.comparison_id);
+            }, 500);
+        } else {
+            errDiv.textContent = data.error || '创建失败';
+            errDiv.classList.remove('hidden');
+            showToast(data.error || '创建失败', 'error');
+        }
+    })
+    .catch(err => { errDiv.textContent = '网络错误'; errDiv.classList.remove('hidden'); });
+}
+
+function loadComparisonGroups() {
+    const wid = document.getElementById('cmp-well').value;
+    const container = document.getElementById('comparison-groups');
+    if (!wid) { container.innerHTML = '<p class="muted" style="margin:0; font-size:13px;">请先选择古井</p>'; return; }
+    container.innerHTML = '<p class="muted" style="margin:0; font-size:13px;">加载中...</p>';
+
+    fetch(`/api/wells/${wid}/labor-comparisons`)
+        .then(r => r.json())
+        .then(data => {
+            if (!data.comparisons || data.comparisons.length === 0) {
+                container.innerHTML = '<p class="muted" style="margin:0; font-size:13px;">暂无对比组，请先创建</p>';
+                return;
+            }
+            let html = '';
+            data.comparisons.forEach(g => {
+                const d = new Date(g.created_at);
+                const ds = d.toLocaleString('zh-CN');
+                const sg = g.synergy_gain ? (g.synergy_gain.overall_score * 100).toFixed(1) + '%' : '-';
+                const rec = g.recommendation ? g.recommendation.best_scheme_name : '-';
+                html += `<div style="padding:12px; margin-bottom:8px; border:1px solid #E8DFD0; border-radius:6px; background:#fff;">
+                    <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+                        <div style="flex:1;">
+                            <strong style="color:#5C4033; font-size:14px;">${g.group_name}</strong>
+                            <div style="font-size:12px; color:#888; margin-top:4px;">
+                                ${g.item_count} 个实验 · 综合增益 <span style="color:#1B7A3E; font-weight:600;">${sg}</span> · ${ds}
+                            </div>
+                            ${g.description ? `<div style="font-size:12px; color:#5C4033; margin-top:4px;">📝 ${g.description}</div>` : ''}
+                            ${rec !== '-' ? `<div style="font-size:12px; color:#8B4513; margin-top:6px; background:#FFF8E7; padding:4px 8px; border-radius:4px; display:inline-block;">🏆 推荐方案：${rec}</div>` : ''}
+                        </div>
+                        <div style="display:flex; gap:6px; margin-left:12px;">
+                            <button class="btn btn-small btn-primary" onclick="viewComparisonGroup(${g.id})">查看分析</button>
+                            <button class="btn btn-small btn-danger" onclick="deleteComparisonGroup(${g.id})">删除</button>
+                        </div>
+                    </div>
+                </div>`;
+            });
+            container.innerHTML = html;
+        })
+        .catch(err => {
+            container.innerHTML = '<p style="color:#d32f2f; margin:0; font-size:13px;">加载失败</p>';
+        });
+}
+
+function deleteComparisonGroup(gid) {
+    if (!confirm('确认删除该对比组？此操作不可恢复。')) return;
+    const fd = new FormData();
+    fetch(`/labor-comparisons/${gid}/delete`, { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                showToast('删除成功', 'success');
+                loadComparisonGroups();
+                document.getElementById('comparison-result').innerHTML = '<p class="muted" style="margin:0; font-size:13px;">请选择对比组查看分析结果</p>';
+            } else {
+                showToast(data.error || '删除失败', 'error');
+            }
+        })
+        .catch(() => showToast('网络错误', 'error'));
+}
+
+function viewComparisonGroup(gid) {
+    const container = document.getElementById('comparison-result');
+    container.innerHTML = '<div style="padding:40px; text-align:center; color:#888;"><div class="spinner" style="margin:0 auto 12px;"></div>分析中...</div>';
+
+    fetch(`/api/labor-comparisons/${gid}`)
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success) {
+                container.innerHTML = `<div style="padding:20px; color:#d32f2f;">加载失败：${data.error || '未知错误'}</div>`;
+                return;
+            }
+            renderComparisonResult(data);
+        })
+        .catch(err => {
+            container.innerHTML = `<div style="padding:20px; color:#d32f2f;">网络错误：${err.message}</div>`;
+        });
+}
+
+function renderComparisonResult(data) {
+    const container = document.getElementById('comparison-result');
+    const items = data.items || [];
+    const sg = data.synergy_gain;
+    const rec = data.recommendation;
+
+    let recHtml = '';
+    if (rec) {
+        recHtml = `<div style="padding:16px; background:linear-gradient(135deg,#FFF8E7 0%,#F5E6C8 100%); border:2px solid #D4A853; border-radius:8px; margin-bottom:16px;">
+            <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+                <span style="font-size:24px;">🏆</span>
+                <strong style="font-size:16px; color:#8B4513;">最优方案推荐</strong>
+            </div>
+            <div style="font-size:14px; color:#5C4033; line-height:1.8;">
+                <div><strong>推荐方案：</strong>${rec.best_scheme_name}</div>
+                <div><strong>推荐理由：</strong></div>
+                <ul style="margin:6px 0 0 20px;">${rec.reasons.map(r => `<li>${r}</li>`).join('')}</ul>
+                <div style="margin-top:8px; padding-top:8px; border-top:1px dashed #D4A853;"><strong>综合评分：</strong><span style="color:#1B7A3E; font-size:18px; font-weight:700;">${(rec.overall_score * 100).toFixed(1)} 分</span></div>
+            </div>
+        </div>`;
+    }
+
+    let sgHtml = '';
+    if (sg) {
+        sgHtml = `<div style="padding:16px; background:#F5F8EB; border:1px solid #A8C97F; border-radius:8px; margin-bottom:16px;">
+            <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+                <span style="font-size:24px;">📈</span>
+                <strong style="font-size:16px; color:#3A5A1E;">协同增益分析</strong>
+            </div>
+            <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:12px;">
+                <div style="padding:10px; background:#fff; border-radius:6px; text-align:center;">
+                    <div style="font-size:11px; color:#888;">人均效率增益</div>
+                    <div style="font-size:20px; font-weight:700; color:${sg.efficiency_gain>=0?'#1B7A3E':'#d32f2f'};">${(sg.efficiency_gain*100).toFixed(1)}%</div>
+                </div>
+                <div style="padding:10px; background:#fff; border-radius:6px; text-align:center;">
+                    <div style="font-size:11px; color:#888;">稳定性提升</div>
+                    <div style="font-size:20px; font-weight:700; color:${sg.stability_improvement>=0?'#1B7A3E':'#d32f2f'};">${(sg.stability_improvement*100).toFixed(1)}%</div>
+                </div>
+                <div style="padding:10px; background:#fff; border-radius:6px; text-align:center;">
+                    <div style="font-size:11px; color:#888;">抗衰减能力</div>
+                    <div style="font-size:20px; font-weight:700; color:${sg.anti_fatigue_improvement>=0?'#1B7A3E':'#d32f2f'};">${(sg.anti_fatigue_improvement*100).toFixed(1)}%</div>
+                </div>
+                <div style="padding:10px; background:#fff; border-radius:6px; text-align:center;">
+                    <div style="font-size:11px; color:#888;">峰值时长延长</div>
+                    <div style="font-size:20px; font-weight:700; color:${sg.peak_duration_extension>=0?'#1B7A3E':'#d32f2f'};">${(sg.peak_duration_extension*100).toFixed(1)}%</div>
+                </div>
+            </div>
+            <div style="padding:10px; background:#fff; border-radius:6px; text-align:center;">
+                <div style="font-size:11px; color:#888;">综合协同增益系数</div>
+                <div style="font-size:28px; font-weight:800; color:#1B7A3E;">${(sg.overall_score*100).toFixed(1)}%</div>
+            </div>
+        </div>`;
+    }
+
+    container.innerHTML = `
+        ${recHtml}
+        ${sgHtml}
+        <div style="margin-bottom:16px;">
+            <h4 style="margin:0 0 8px; color:#5C4033;">📊 多组实验效率曲线对比</h4>
+            <div id="cmp-efficiency-chart" style="height:360px; background:#fff; padding:10px; border-radius:6px; border:1px solid #E8DFD0;"></div>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px;">
+            <div>
+                <h4 style="margin:0 0 8px; color:#5C4033;">🎯 五维协同能力雷达图</h4>
+                <div id="cmp-radar-chart" style="height:360px; background:#fff; padding:10px; border-radius:6px; border:1px solid #E8DFD0;"></div>
+            </div>
+            <div>
+                <h4 style="margin:0 0 8px; color:#5C4033;">💰 单位人力效率对比</h4>
+                <div id="cmp-bar-chart" style="height:360px; background:#fff; padding:10px; border-radius:6px; border:1px solid #E8DFD0;"></div>
+            </div>
+        </div>
+        <div>
+            <h4 style="margin:0 0 8px; color:#5C4033;">📋 详细指标对比表</h4>
+            <div id="cmp-detail-table" style="background:#fff; border-radius:6px; border:1px solid #E8DFD0; overflow:auto;"></div>
+        </div>
+    `;
+
+    setTimeout(() => {
+        renderCmpEfficiencyChart(items);
+        renderCmpRadarChart(items, sg);
+        renderCmpBarChart(items);
+        renderCmpDetailTable(items, sg, rec);
+    }, 50);
+}
+
+const CMP_COLORS = ['#8B4513', '#1B7A3E', '#1E4D8C', '#8B1A1A', '#6A3D9A', '#B8860B', '#2E7D8A', '#C04D5A'];
+
+function renderCmpEfficiencyChart(items) {
+    const el = document.getElementById('cmp-efficiency-chart');
+    if (!el || typeof Plotly === 'undefined' || !items.length) return;
+
+    const traces = [];
+    items.forEach((item, idx) => {
+        const tp = item.time_points || [];
+        const colors = CMP_COLORS[idx % CMP_COLORS.length];
+        const nm = item.experiment ? item.experiment.experiment_name : `实验${idx+1}`;
+        const an = item.analysis_result;
+
+        let flowTrace = null;
+        if (an && an.instantaneous_flows && an.instantaneous_flows.length) {
+            flowTrace = {
+                x: an.instantaneous_flows.map(f => f.time_min),
+                y: an.instantaneous_flows.map(f => f.flow_lpm),
+                mode: 'lines+markers',
+                name: `${nm} - 瞬时流量`,
+                line: { color: colors, width: 2.5 },
+                marker: { size: 5, color: colors }
+            };
+        } else if (tp.length >= 2) {
+            const xs = [0], ys = [0];
+            for (let i = 1; i < tp.length; i++) {
+                const dt = tp[i].elapsed_min - tp[i-1].elapsed_min;
+                const dw = tp[i].total_water_l - tp[i-1].total_water_l;
+                xs.push(tp[i].elapsed_min);
+                ys.push(dt > 0 ? (dw / dt) : 0);
+            }
+            flowTrace = {
+                x: xs, y: ys,
+                mode: 'lines+markers',
+                name: `${nm} - 瞬时流量`,
+                line: { color: colors, width: 2.5 },
+                marker: { size: 5, color: colors }
+            };
+        }
+        if (flowTrace) traces.push(flowTrace);
+
+        if (an && an.peak_info) {
+            const pi = an.peak_info;
+            traces.push({
+                x: [pi.peak_start_min, pi.peak_end_min],
+                y: [pi.peak_flow_lpm * 0.8, pi.peak_flow_lpm * 0.8],
+                mode: 'lines',
+                name: `${nm} - 峰值区间`,
+                line: { color: colors, width: 4, dash: 'dash' },
+                showlegend: false
+            });
+        }
+    });
+
+    Plotly.newPlot(el, traces, {
+        margin: { t: 30, b: 50, l: 60, r: 20 },
+        xaxis: { title: '时间 (分钟)', gridcolor: '#F0E6D3', zerolinecolor: '#D4C5A9' },
+        yaxis: { title: '出水量 (L/min)', gridcolor: '#F0E6D3', zerolinecolor: '#D4C5A9' },
+        legend: { orientation: 'h', y: -0.2 },
+        plot_bgcolor: '#FFFBF2',
+        paper_bgcolor: '#FFFBF2',
+        font: { family: 'Segoe UI, sans-serif', color: '#5C4033' }
+    }, { responsive: true, displayModeBar: false });
+}
+
+function renderCmpRadarChart(items, sg) {
+    const el = document.getElementById('cmp-radar-chart');
+    if (!el || typeof Plotly === 'undefined' || !items.length) return;
+
+    const axes = ['人均效率', '稳定性', '抗衰减能力', '峰值持续时间', '持续作业能力'];
+    const traces = [];
+
+    items.forEach((item, idx) => {
+        const an = item.analysis_result;
+        const nm = item.experiment ? item.experiment.experiment_name : `实验${idx+1}`;
+        if (!an) return;
+
+        const norm = (v, inv=false) => {
+            if (v === undefined || v === null || isNaN(v)) return 0;
+            let r = Math.max(0, Math.min(100, v * 100));
+            return inv ? (100 - r) : r;
+        };
+
+        const vals = [
+            Math.min(100, (an.per_capita_flow_lpm || 0) * 20),
+            norm(an.stability_cv ? (1 - Math.min(1, an.stability_cv/50)) : 0.5),
+            norm(an.efficiency_decay_rate ? (1 - Math.min(1, an.efficiency_decay_rate)) : 0.5),
+            Math.min(100, an.peak_info ? (an.peak_info.duration_min / Math.max(1, an.peak_info.peak_start_min + an.peak_info.duration_min + 1)) * 100 : 30),
+            norm(1 - (an.efficiency_decay_rate || 0.3))
+        ];
+
+        traces.push({
+            type: 'scatterpolar',
+            r: vals,
+            theta: axes,
+            fill: 'toself',
+            name: nm,
+            line: { color: CMP_COLORS[idx % CMP_COLORS.length], width: 2 },
+            marker: { color: CMP_COLORS[idx % CMP_COLORS.length] },
+            opacity: 0.7
+        });
+    });
+
+    Plotly.newPlot(el, traces, {
+        margin: { t: 30, b: 30, l: 30, r: 30 },
+        polar: {
+            radialaxis: { range: [0, 100], gridcolor: '#E8DFD0', tickfont: { size: 10 }, tickvals: [0,25,50,75,100] },
+            angularaxis: { gridcolor: '#E8DFD0', tickfont: { size: 11, color: '#5C4033' } },
+            bgcolor: '#FFFBF2'
+        },
+        legend: { orientation: 'h', y: -0.1, font: { size: 10 } },
+        plot_bgcolor: '#FFFBF2',
+        paper_bgcolor: '#FFFBF2',
+        font: { family: 'Segoe UI, sans-serif', color: '#5C4033' }
+    }, { responsive: true, displayModeBar: false });
+}
+
+function renderCmpBarChart(items) {
+    const el = document.getElementById('cmp-bar-chart');
+    if (!el || typeof Plotly === 'undefined' || !items.length) return;
+
+    const names = items.map((item, i) => item.experiment ? item.experiment.experiment_name : `实验${i+1}`);
+    const pcFlows = items.map(i => i.analysis_result ? (i.analysis_result.per_capita_flow_lpm || 0) : 0);
+    const avgFlows = items.map(i => i.analysis_result ? (i.analysis_result.avg_flow_lpm || 0) : 0);
+    const totalWaters = items.map(i => i.analysis_result ? (i.analysis_result.total_water_l || 0) : 0);
+
+    const traces = [
+        { x: names, y: pcFlows, type: 'bar', name: '人均出水量(L/min/人)', marker: { color: '#8B4513' }, text: pcFlows.map(v => v.toFixed(2)), textposition: 'auto', texttemplate: '%{y:.2f}' },
+        { x: names, y: avgFlows, type: 'bar', name: '组均出水量(L/min)', marker: { color: '#1B7A3E' }, text: avgFlows.map(v => v.toFixed(2)), textposition: 'auto', texttemplate: '%{y:.2f}' },
+        { x: names, y: totalWaters.map(v => v/10), type: 'bar', name: '总出水量(/10 L)', marker: { color: '#1E4D8C' }, text: totalWaters.map(v => v.toFixed(1)), textposition: 'auto', texttemplate: '%{text}' }
+    ];
+
+    Plotly.newPlot(el, traces, {
+        margin: { t: 30, b: 80, l: 60, r: 20 },
+        barmode: 'group',
+        xaxis: { gridcolor: '#F0E6D3', tickangle: -20, tickfont: { size: 11 } },
+        yaxis: { title: '效率数值', gridcolor: '#F0E6D3', zerolinecolor: '#D4C5A9' },
+        legend: { orientation: 'h', y: -0.3, font: { size: 10 } },
+        plot_bgcolor: '#FFFBF2',
+        paper_bgcolor: '#FFFBF2',
+        font: { family: 'Segoe UI, sans-serif', color: '#5C4033' }
+    }, { responsive: true, displayModeBar: false });
+}
+
+function renderCmpDetailTable(items, sg, rec) {
+    const el = document.getElementById('cmp-detail-table');
+    if (!el || !items.length) return;
+
+    const rows = [
+        ['实验名称', i => i.experiment ? i.experiment.experiment_name : '-'],
+        ['人数', i => i.experiment ? i.experiment.worker_count : '-'],
+        ['分工方式', i => i.experiment ? i.experiment.work_mode : '-'],
+        ['总出水量 (L)', i => i.analysis_result ? i.analysis_result.total_water_l.toFixed(2) : '-'],
+        ['平均流量 (L/min)', i => i.analysis_result ? i.analysis_result.avg_flow_lpm.toFixed(2) : '-'],
+        ['人均流量 (L/min/人)', i => i.analysis_result ? i.analysis_result.per_capita_flow_lpm.toFixed(3) : '-'],
+        ['峰值流量 (L/min)', i => i.analysis_result && i.analysis_result.peak_info ? i.analysis_result.peak_info.peak_flow_lpm.toFixed(2) : '-'],
+        ['峰值持续时间 (min)', i => i.analysis_result && i.analysis_result.peak_info ? i.analysis_result.peak_info.duration_min.toFixed(1) : '-'],
+        ['效率衰减率 (%)', i => i.analysis_result ? (i.analysis_result.efficiency_decay_rate * 100).toFixed(1) : '-'],
+        ['稳定性CV (%)', i => i.analysis_result ? (i.analysis_result.stability_cv || 0).toFixed(2) : '-'],
+        ['疲劳相关系数', i => i.analysis_result ? (i.analysis_result.fatigue_correlation || 0).toFixed(3) : '-'],
+        ['异常点数量', i => i.analysis_result && i.analysis_result.anomalies ? i.analysis_result.anomalies.length : 0],
+        ['综合评分', i => i.analysis_result ? (i.analysis_result.overall_score ? (i.analysis_result.overall_score*100).toFixed(1) : '-') : '-']
+    ];
+
+    let html = '<table style="width:100%; border-collapse:collapse; font-size:12px;"><thead><tr style="background:#F5E6C8;">';
+    html += '<th style="padding:8px 12px; border:1px solid #E8DFD0; text-align:left; color:#5C4033; position:sticky; left:0; background:#F5E6C8; z-index:1;">指标</th>';
+    items.forEach((item, i) => {
+        const nm = item.experiment ? item.experiment.experiment_name : `实验${i+1}`;
+        const isBest = rec && item.experiment && rec.best_scheme_id === item.experiment.id;
+        html += `<th style="padding:8px 12px; border:1px solid #E8DFD0; text-align:center; color:#5C4033; ${isBest?'background:#D4F0D9;':''}">${isBest?'🏆 ':''}${nm}</th>`;
+    });
+    html += '</tr></thead><tbody>';
+
+    rows.forEach(([label, fn]) => {
+        html += `<tr><td style="padding:8px 12px; border:1px solid #E8DFD0; font-weight:600; color:#5C4033; position:sticky; left:0; background:#FFFBF2; z-index:1;">${label}</td>`;
+        items.forEach((item, i) => {
+            const val = fn(item);
+            const isBest = rec && item.experiment && rec.best_scheme_id === item.experiment.id;
+            html += `<td style="padding:8px 12px; border:1px solid #E8DFD0; text-align:center; ${isBest?'background:#EDF7EF; font-weight:600;':''}">${val}</td>`;
+        });
+        html += '</tr>';
+    });
+
+    html += '</tbody></table>';
+    el.innerHTML = html;
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    const cmpWellSel = document.getElementById('cmp-well');
+    if (cmpWellSel) cmpWellSel.addEventListener('change', function() {
+        loadAvailableExperiments();
+        loadComparisonGroups();
+    });
+    loadAvailableExperiments();
+    loadComparisonGroups();
+});
+{% endblock %}
+</body>
+</html>

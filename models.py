@@ -148,3 +148,106 @@ class ExperimentReport(Base):
     avg_flow_rate_lpm = Column(Float, default=0)
     avg_speed_rpm = Column(Float, default=0)
     created_at = Column(DateTime, default=datetime.now)
+
+
+class LaborExperiment(Base):
+    __tablename__ = "labor_experiment"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    well_id = Column(Integer, ForeignKey("well.id", ondelete="CASCADE"), nullable=False)
+    config_id = Column(Integer, ForeignKey("well_config.id", ondelete="CASCADE"))
+    experiment_name = Column(String(200), nullable=False)
+    worker_count = Column(Integer, nullable=False)
+    work_mode = Column(String(50), nullable=False)
+    continuous_duration_min = Column(Float, nullable=False)
+    rest_interval_min = Column(Float, default=0)
+    fatigue_factor = Column(Float, default=0.0)
+    notes = Column(Text, default="")
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    __table_args__ = (
+        CheckConstraint("worker_count >= 1", name="ck_worker_count_positive"),
+        CheckConstraint("continuous_duration_min > 0", name="ck_continuous_duration_positive"),
+        CheckConstraint("rest_interval_min >= 0", name="ck_rest_interval_non_negative"),
+        CheckConstraint("fatigue_factor >= 0 AND fatigue_factor <= 1", name="ck_fatigue_factor_range"),
+    )
+
+    well = relationship("Well")
+    config = relationship("WellConfig")
+    time_points = relationship("LaborTimePoint", back_populates="experiment", cascade="all, delete-orphan", order_by="LaborTimePoint.point_index")
+    analysis_result = relationship("LaborAnalysisResult", back_populates="experiment", cascade="all, delete-orphan", uselist=False)
+
+
+class LaborTimePoint(Base):
+    __tablename__ = "labor_time_point"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    experiment_id = Column(Integer, ForeignKey("labor_experiment.id", ondelete="CASCADE"), nullable=False)
+    point_index = Column(Integer, nullable=False)
+    elapsed_min = Column(Float, nullable=False)
+    total_water_l = Column(Float, nullable=False)
+    worker_rotation = Column(Integer, default=0)
+    fatigue_level = Column(Float, default=0)
+    is_rest_period = Column(Boolean, default=False)
+
+    __table_args__ = (
+        CheckConstraint("elapsed_min >= 0", name="ck_elapsed_non_negative"),
+        CheckConstraint("total_water_l >= 0", name="ck_total_water_non_negative"),
+        CheckConstraint("fatigue_level >= 0 AND fatigue_level <= 1", name="ck_fatigue_level_range"),
+        UniqueConstraint("experiment_id", "point_index", name="uq_labor_exp_point"),
+    )
+
+    experiment = relationship("LaborExperiment", back_populates="time_points")
+
+
+class LaborAnalysisResult(Base):
+    __tablename__ = "labor_analysis_result"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    experiment_id = Column(Integer, ForeignKey("labor_experiment.id", ondelete="CASCADE"), nullable=False, unique=True)
+    total_water_l = Column(Float, default=0)
+    total_effective_min = Column(Float, default=0)
+    total_rest_min = Column(Float, default=0)
+    avg_flow_rate_lpm = Column(Float, default=0)
+    per_capita_flow_lpm = Column(Float, default=0)
+    peak_flow_rate_lpm = Column(Float, default=0)
+    peak_duration_min = Column(Float, default=0)
+    peak_start_min = Column(Float, default=0)
+    efficiency_decay_pct = Column(Float, default=0)
+    stability_cv = Column(Float, default=0)
+    fatigue_correlation = Column(Float, default=0)
+    work_rest_ratio = Column(Float, default=0)
+    anomaly_flags = Column(Text, default="")
+    created_at = Column(DateTime, default=datetime.now)
+
+    experiment = relationship("LaborExperiment", back_populates="analysis_result")
+
+
+class LaborComparisonGroup(Base):
+    __tablename__ = "labor_comparison_group"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    well_id = Column(Integer, ForeignKey("well.id", ondelete="CASCADE"), nullable=False)
+    group_name = Column(String(200), nullable=False)
+    description = Column(Text, default="")
+    created_at = Column(DateTime, default=datetime.now)
+
+    well = relationship("Well")
+    items = relationship("LaborComparisonItem", back_populates="group", cascade="all, delete-orphan")
+
+
+class LaborComparisonItem(Base):
+    __tablename__ = "labor_comparison_item"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    group_id = Column(Integer, ForeignKey("labor_comparison_group.id", ondelete="CASCADE"), nullable=False)
+    experiment_id = Column(Integer, ForeignKey("labor_experiment.id", ondelete="CASCADE"), nullable=False)
+    sort_order = Column(Integer, default=0)
+
+    __table_args__ = (
+        UniqueConstraint("group_id", "experiment_id", name="uq_group_experiment"),
+    )
+
+    group = relationship("LaborComparisonGroup", back_populates="items")
+    experiment = relationship("LaborExperiment")

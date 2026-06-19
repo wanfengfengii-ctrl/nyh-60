@@ -26,7 +26,9 @@ def get_db():
 def init_db():
     from models import (
         Well, WellConfig, Experiment, TimePoint,
-        ConfigChangeLog, ExperimentReview, ImportExportLog, ExperimentReport
+        ConfigChangeLog, ExperimentReview, ImportExportLog, ExperimentReport,
+        LaborExperiment, LaborTimePoint, LaborAnalysisResult,
+        LaborComparisonGroup, LaborComparisonItem
     )
     Base.metadata.create_all(bind=engine)
 

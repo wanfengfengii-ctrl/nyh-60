@@ -17,7 +17,9 @@ from schemas import (
     ExperimentCreate, ExperimentUpdate,
     TimePointCreate, EfficiencyData, ComparisonData,
     WellComparisonData, EfficiencyPredictionInput,
-    ExperimentReviewCreate, ExperimentReportCreate
+    ExperimentReviewCreate, ExperimentReportCreate,
+    LaborExperimentCreate, LaborExperimentUpdate,
+    LaborTimePointCreate, LaborComparisonGroupCreate
 )
 from crud import (
     get_wells, get_well, create_well, update_well, delete_well,
@@ -29,7 +31,13 @@ from crud import (
     review_experiment, recalculate_all_for_config, get_experiment_reviews,
     get_import_export_logs, create_import_export_log,
     get_reports, get_report, create_report, delete_report,
-    predict_well_efficiency
+    predict_well_efficiency,
+    get_labor_experiments, get_labor_experiment, create_labor_experiment,
+    update_labor_experiment, update_labor_time_points, delete_labor_experiment,
+    recalculate_labor_experiment,
+    get_labor_comparison_groups, get_labor_comparison_group,
+    create_labor_comparison_group, delete_labor_comparison_group,
+    analyze_labor_comparison_group
 )
 from calculator import calculate_experiment_efficiency
 
@@ -787,6 +795,350 @@ async def get_import_export_logs_api(db: Session = Depends(get_db)):
             "created_at": log.created_at.strftime("%Y-%m-%d %H:%M:%S") if log.created_at else None
         } for log in logs
     ]})
+
+
+@app.get("/labor-analysis", response_class=HTMLResponse)
+async def labor_analysis_page(request: Request, db: Session = Depends(get_db)):
+    wells = get_wells(db)
+    pending_count = len(get_all_pending_reviews(db))
+    all_labor_exps = get_labor_experiments(db)
+    comparison_groups = get_labor_comparison_groups(db)
+    return templates.TemplateResponse("labor_analysis.html", {
+        "request": request,
+        "wells": wells,
+        "pending_count": pending_count,
+        "labor_experiments": all_labor_exps,
+        "comparison_groups": comparison_groups
+    })
+
+
+@app.post("/wells/{well_id}/labor-experiments")
+async def create_labor_experiment_endpoint(
+    well_id: int,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    well = get_well(db, well_id)
+    if not well:
+        return JSONResponse({"success": False, "error": "古井档案不存在"}, status_code=404)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"success": False, "error": "请求数据格式错误"}, status_code=400)
+
+    time_points_raw = body.get("time_points", [])
+    meta = body.get("meta", None)
+    if meta:
+        get_field = lambda k, default=None: meta.get(k, body.get(k, default))
+    else:
+        get_field = lambda k, default=None: body.get(k, default)
+    try:
+        time_points = [LaborTimePointCreate(**tp) for tp in time_points_raw]
+    except ValidationError as e:
+        errors = "; ".join([f"时间点{err['loc'][-1]}: {err['msg']}" for err in e.errors()])
+        return JSONResponse({"success": False, "error": f"时间点数据错误: {errors}"}, status_code=400)
+
+    try:
+        exp_data = LaborExperimentCreate(
+            experiment_name=get_field("experiment_name", ""),
+            worker_count=int(get_field("worker_count", 1)),
+            work_mode=get_field("work_mode", "单人独立"),
+            continuous_duration_min=float(get_field("continuous_duration_min", 0)),
+            rest_interval_min=float(get_field("rest_interval_min", 0) or 0),
+            fatigue_factor=float(get_field("fatigue_factor", 0) or 0),
+            notes=get_field("notes", ""),
+            config_id=int(get_field("config_id")) if get_field("config_id") else None,
+            time_points=time_points
+        )
+    except ValidationError as e:
+        errors = "; ".join([err["msg"] for err in e.errors()])
+        return JSONResponse({"success": False, "error": f"数据错误: {errors}"}, status_code=400)
+
+    try:
+        exp = create_labor_experiment(db, exp_data, well_id)
+    except ValueError as e:
+        return JSONResponse({"success": False, "error": str(e)}, status_code=400)
+
+    return JSONResponse({"success": True, "experiment_id": exp.id, "redirect": "/labor-analysis"})
+
+
+@app.get("/api/labor-experiments/{exp_id}")
+async def get_labor_experiment_api(exp_id: int, db: Session = Depends(get_db)):
+    exp = get_labor_experiment(db, exp_id)
+    if not exp:
+        raise HTTPException(status_code=404, detail="劳作实验不存在")
+
+    from calculator import calculate_labor_instantaneous_flows
+    flows = calculate_labor_instantaneous_flows(exp.time_points)
+
+    time_points_resp = []
+    for i, tp in enumerate(exp.time_points):
+        time_points_resp.append({
+            "id": tp.id,
+            "point_index": tp.point_index,
+            "elapsed_min": tp.elapsed_min,
+            "total_water_l": tp.total_water_l,
+            "worker_rotation": tp.worker_rotation,
+            "fatigue_level": tp.fatigue_level,
+            "is_rest_period": tp.is_rest_period,
+            "instantaneous_flow_lpm": flows[i] if i < len(flows) else 0
+        })
+
+    analysis = exp.analysis_result
+    analysis_resp = None
+    if analysis:
+        from calculator import detect_labor_anomalies
+        anomalies = detect_labor_anomalies(exp.time_points, flows)
+        analysis_resp = {
+            "id": analysis.id,
+            "experiment_id": analysis.experiment_id,
+            "total_water_l": analysis.total_water_l,
+            "total_effective_min": analysis.total_effective_min,
+            "total_rest_min": analysis.total_rest_min,
+            "avg_flow_lpm": analysis.avg_flow_rate_lpm,
+            "avg_flow_rate_lpm": analysis.avg_flow_rate_lpm,
+            "per_capita_flow_lpm": analysis.per_capita_flow_lpm,
+            "peak_info": {
+                "peak_flow_lpm": analysis.peak_flow_rate_lpm,
+                "peak_start_min": analysis.peak_start_min,
+                "peak_end_min": analysis.peak_start_min + analysis.peak_duration_min,
+                "duration_min": analysis.peak_duration_min,
+                "peak_time_min": analysis.peak_start_min
+            },
+            "peak_flow_rate_lpm": analysis.peak_flow_rate_lpm,
+            "peak_duration_min": analysis.peak_duration_min,
+            "peak_start_min": analysis.peak_start_min,
+            "efficiency_decay_rate": (analysis.efficiency_decay_pct or 0) / 100.0,
+            "efficiency_decay_pct": analysis.efficiency_decay_pct,
+            "stability_cv": analysis.stability_cv,
+            "fatigue_correlation": analysis.fatigue_correlation,
+            "work_rest_ratio": analysis.work_rest_ratio,
+            "anomaly_flags": analysis.anomaly_flags,
+            "anomalies": anomalies,
+            "anomaly_list": anomalies,
+            "overall_score": 0.6
+        }
+
+    return JSONResponse({
+        "success": True,
+        "id": exp.id,
+        "well_id": exp.well_id,
+        "config_id": exp.config_id,
+        "experiment_name": exp.experiment_name,
+        "worker_count": exp.worker_count,
+        "work_mode": exp.work_mode,
+        "continuous_duration_min": exp.continuous_duration_min,
+        "rest_interval_min": exp.rest_interval_min,
+        "fatigue_factor": exp.fatigue_factor,
+        "notes": exp.notes or "",
+        "created_at": exp.created_at.strftime("%Y-%m-%d %H:%M:%S") if exp.created_at else None,
+        "updated_at": exp.updated_at.strftime("%Y-%m-%d %H:%M:%S") if exp.updated_at else None,
+        "time_points": time_points_resp,
+        "analysis_result": analysis_resp,
+        "instantaneous_flows": [{"time_min": tp.elapsed_min, "flow_lpm": flows[i] if i < len(flows) else 0} for i, tp in enumerate(exp.time_points)]
+    })
+
+
+@app.put("/api/labor-experiments/{exp_id}")
+async def update_labor_experiment_api(
+    exp_id: int,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    exp = get_labor_experiment(db, exp_id)
+    if not exp:
+        raise HTTPException(status_code=404, detail="劳作实验不存在")
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"success": False, "error": "请求数据格式错误"}, status_code=400)
+
+    meta = body.get("meta", {})
+    time_points_data = body.get("time_points", None)
+
+    try:
+        if meta:
+            update_data = LaborExperimentUpdate(**meta)
+            exp = update_labor_experiment(db, exp, update_data)
+
+        if time_points_data is not None:
+            if len(time_points_data) < 3:
+                return JSONResponse({"success": False, "error": "至少需要3个时间点"}, status_code=400)
+            exp = update_labor_time_points(db, exp, time_points_data)
+
+        return JSONResponse({"success": True, "experiment_id": exp.id})
+    except ValidationError as e:
+        errors = "; ".join([err["msg"] for err in e.errors()])
+        return JSONResponse({"success": False, "error": f"数据错误: {errors}"}, status_code=400)
+    except ValueError as e:
+        return JSONResponse({"success": False, "error": str(e)}, status_code=400)
+
+
+@app.post("/labor-experiments/{exp_id}/delete")
+async def delete_labor_experiment_endpoint(exp_id: int, db: Session = Depends(get_db)):
+    if not delete_labor_experiment(db, exp_id):
+        raise HTTPException(status_code=404, detail="劳作实验不存在")
+    return RedirectResponse(url="/labor-analysis", status_code=303)
+
+
+@app.post("/api/labor-experiments/{exp_id}/recalculate")
+async def recalculate_labor_experiment_api(exp_id: int, db: Session = Depends(get_db)):
+    exp = get_labor_experiment(db, exp_id)
+    if not exp:
+        raise HTTPException(status_code=404, detail="劳作实验不存在")
+    try:
+        result = recalculate_labor_experiment(db, exp)
+        return JSONResponse({"success": True, "analysis_id": result.id})
+    except Exception as e:
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/wells/{well_id}/labor-experiments")
+async def get_well_labor_experiments_api(well_id: int, db: Session = Depends(get_db)):
+    well = get_well(db, well_id)
+    if not well:
+        raise HTTPException(status_code=404, detail="古井档案不存在")
+    experiments = get_labor_experiments(db, well_id=well_id)
+
+    from calculator import calculate_labor_instantaneous_flows, detect_labor_anomalies
+    result = []
+    for exp in experiments:
+        flows = calculate_labor_instantaneous_flows(exp.time_points)
+        anomalies = detect_labor_anomalies(exp.time_points, flows)
+        analysis = exp.analysis_result
+        tps = []
+        for i, tp in enumerate(exp.time_points):
+            tps.append({
+                "point_index": tp.point_index,
+                "elapsed_min": tp.elapsed_min,
+                "total_water_l": tp.total_water_l,
+                "worker_rotation": tp.worker_rotation,
+                "fatigue_level": tp.fatigue_level,
+                "is_rest_period": tp.is_rest_period,
+                "instantaneous_flow_lpm": flows[i] if i < len(flows) else 0
+            })
+        result.append({
+            "id": exp.id,
+            "experiment_name": exp.experiment_name,
+            "worker_count": exp.worker_count,
+            "work_mode": exp.work_mode,
+            "continuous_duration_min": exp.continuous_duration_min,
+            "rest_interval_min": exp.rest_interval_min,
+            "fatigue_factor": exp.fatigue_factor,
+            "notes": exp.notes or "",
+            "time_points": tps,
+            "instantaneous_flows": flows,
+            "anomaly_list": anomalies,
+            "analysis_result": {
+                "total_water_l": analysis.total_water_l if analysis else 0,
+                "total_effective_min": analysis.total_effective_min if analysis else 0,
+                "total_rest_min": analysis.total_rest_min if analysis else 0,
+                "avg_flow_lpm": analysis.avg_flow_rate_lpm if analysis else 0,
+                "avg_flow_rate_lpm": analysis.avg_flow_rate_lpm if analysis else 0,
+                "per_capita_flow_lpm": analysis.per_capita_flow_lpm if analysis else 0,
+                "peak_flow_rate_lpm": analysis.peak_flow_rate_lpm if analysis else 0,
+                "peak_duration_min": analysis.peak_duration_min if analysis else 0,
+                "peak_start_min": analysis.peak_start_min if analysis else 0,
+                "efficiency_decay_pct": analysis.efficiency_decay_pct if analysis else 0,
+                "efficiency_decay_rate": (analysis.efficiency_decay_pct if analysis else 0) / 100.0,
+                "stability_cv": analysis.stability_cv if analysis else 0,
+                "fatigue_correlation": analysis.fatigue_correlation if analysis else 0,
+                "work_rest_ratio": analysis.work_rest_ratio if analysis else 0,
+                "anomaly_flags": analysis.anomaly_flags if analysis else "",
+                "anomalies": anomalies,
+                "peak_info": {
+                    "peak_flow_lpm": analysis.peak_flow_rate_lpm if analysis else 0,
+                    "peak_start_min": analysis.peak_start_min if analysis else 0,
+                    "peak_end_min": (analysis.peak_start_min or 0) + (analysis.peak_duration_min or 0),
+                    "duration_min": analysis.peak_duration_min if analysis else 0
+                }
+            } if analysis else None
+        })
+    return JSONResponse({"experiments": result})
+
+
+@app.post("/wells/{well_id}/labor-comparisons")
+async def create_labor_comparison_endpoint(
+    well_id: int,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    well = get_well(db, well_id)
+    if not well:
+        return JSONResponse({"success": False, "error": "古井档案不存在"}, status_code=404)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"success": False, "error": "请求数据格式错误"}, status_code=400)
+
+    try:
+        exp_ids = body.get("experiment_ids", [])
+        items_data = body.get("items", [])
+        if exp_ids and not items_data:
+            items_data = [{"experiment_id": eid, "sort_order": i} for i, eid in enumerate(exp_ids)]
+        from schemas import LaborComparisonItemCreate
+        items = [LaborComparisonItemCreate(**item) for item in items_data]
+        data = LaborComparisonGroupCreate(
+            well_id=well_id,
+            group_name=body.get("group_name", ""),
+            description=body.get("description", ""),
+            items=items
+        )
+    except ValidationError as e:
+        errors = "; ".join([err["msg"] for err in e.errors()])
+        return JSONResponse({"success": False, "error": f"数据错误: {errors}"}, status_code=400)
+
+    try:
+        group = create_labor_comparison_group(db, data)
+    except ValueError as e:
+        return JSONResponse({"success": False, "error": str(e)}, status_code=400)
+
+    return JSONResponse({"success": True, "group_id": group.id, "redirect": "/labor-analysis"})
+
+
+@app.get("/api/labor-comparisons/{group_id}")
+async def get_labor_comparison_api(group_id: int, db: Session = Depends(get_db)):
+    group = get_labor_comparison_group(db, group_id)
+    if not group:
+        raise HTTPException(status_code=404, detail="对比组不存在")
+    result = analyze_labor_comparison_group(db, group)
+    result["success"] = True
+    return JSONResponse(result)
+
+
+@app.post("/labor-comparisons/{group_id}/delete")
+async def delete_labor_comparison_endpoint(group_id: int, db: Session = Depends(get_db)):
+    if not delete_labor_comparison_group(db, group_id):
+        raise HTTPException(status_code=404, detail="对比组不存在")
+    return RedirectResponse(url="/labor-analysis", status_code=303)
+
+
+@app.get("/api/wells/{well_id}/labor-comparisons")
+async def get_well_labor_comparisons_api(well_id: int, db: Session = Depends(get_db)):
+    well = get_well(db, well_id)
+    if not well:
+        raise HTTPException(status_code=404, detail="古井档案不存在")
+    groups = get_labor_comparison_groups(db, well_id=well_id)
+    result = []
+    for g in groups:
+        ana = analyze_labor_comparison_group(db, g)
+        sg = ana.get("synergy_gain", {})
+        rec = ana.get("recommendation", {})
+        result.append({
+            "id": g.id,
+            "group_name": g.group_name,
+            "description": g.description or "",
+            "item_count": len(g.items),
+            "experiment_count": len(g.items),
+            "experiment_ids": [item.experiment_id for item in g.items],
+            "synergy_gain": sg,
+            "recommendation": rec,
+            "created_at": g.created_at.strftime("%Y-%m-%d %H:%M:%S") if g.created_at else None
+        })
+    return JSONResponse({"comparisons": result, "groups": result})
 
 
 if __name__ == "__main__":
