@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="page-container">
+    <section class="hero-section">
+        <div class="hero-content">
+            <h1 class="hero-title">古井汲水效率复原平台</h1>
+            <p class="hero-subtitle">量化研究传统辘轳井汲水工艺，复原古代水利智慧</p>
+        </div>
+    </section>
+
+    <section class="control-section">
+        <button class="btn-primary" id="toggle-well-form">+ 新建古井档案</button>
+    </section>
+
+    <div id="create-well-form" class="form-panel hidden">
+        <div class="panel-header">
+            <h3>新建古井档案</h3>
+            <button class="btn-close" id="close-well-form">×</button>
+        </div>
+        <form action="/wells" method="post" class="well-form">
+            <div class="form-row">
+                <label class="form-group">
+                    <span class="form-label">井名 <em>*</em></span>
+                    <input type="text" name="name" required maxlength="100" placeholder="如：绍兴东浦镇老街井">
+                </label>
+            </div>
+            <div class="form-row two-col">
+                <label class="form-group">
+                    <span class="form-label">位置</span>
+                    <input type="text" name="location" maxlength="200" placeholder="如：浙江省绍兴市">
+                </label>
+                <label class="form-group">
+                    <span class="form-label">年代</span>
+                    <input type="text" name="dynasty" maxlength="50" placeholder="如：清代乾隆年间">
+                </label>
+            </div>
+            <div class="form-row">
+                <label class="form-group">
+                    <span class="form-label">描述</span>
+                    <textarea name="description" rows="3" maxlength="500" placeholder="关于此古井的历史背景、形制特点等描述..."></textarea>
+                </label>
+            </div>
+            <div class="form-actions">
+                <button type="submit" class="btn-primary">创建古井档案</button>
+            </div>
+        </form>
+    </div>
+
+    <section class="wells-grid">
+        {% if wells %}
+            {% for well in wells %}
+            <article class="well-card">
+                <div class="card-header">
+                    <h3 class="card-title">{{ well.name }}</h3>
+                    <form action="/wells/{{ well.id }}/delete" method="post" onsubmit="return confirm('确定删除此古井档案及所有相关数据？');">
+                        <button type="submit" class="btn-delete" title="删除">✕</button>
+                    </form>
+                </div>
+                <div class="card-meta">
+                    {% if well.location %}
+                    <span class="meta-item"><strong>位置：</strong>{{ well.location }}</span>
+                    {% endif %}
+                    {% if well.dynasty %}
+                    <span class="meta-item"><strong>年代：</strong>{{ well.dynasty }}</span>
+                    {% endif %}
+                    <span class="meta-item"><strong>创建：</strong>{{ well.created_at.strftime('%Y-%m-%d') }}</span>
+                </div>
+                {% if well.description %}
+                <p class="card-desc">{{ well.description[:80] }}{% if well.description|length > 80 %}...{% endif %}</p>
+                {% endif %}
+                <div class="card-footer">
+                    <a href="/wells/{{ well.id }}" class="btn-enter">进入详情 →</a>
+                </div>
+            </article>
+            {% endfor %}
+        {% else %}
+            <div class="empty-state">
+                <div class="empty-icon">⛲</div>
+                <p class="empty-text">暂无古井档案，点击上方「新建古井档案」开始创建</p>
+            </div>
+        {% endif %}
+    </section>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const toggleBtn = document.getElementById('toggle-well-form');
+    const closeBtn = document.getElementById('close-well-form');
+    const formPanel = document.getElementById('create-well-form');
+
+    if (toggleBtn) {
+        toggleBtn.addEventListener('click', function() {
+            formPanel.classList.toggle('hidden');
+            if (!formPanel.classList.contains('hidden')) {
+                setTimeout(() => formPanel.querySelector('input[name="name"]').focus(), 100);
+            }
+        });
+    }
+    if (closeBtn) {
+        closeBtn.addEventListener('click', function() {
+            formPanel.classList.add('hidden');
+        });
+    }
+});
+</script>
+{% endblock %}

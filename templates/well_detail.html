@@ -1,0 +1,514 @@
+{% extends "base.html" %}
+
+{% block title %}{{ well.name }} - 古井汲水效率复原平台{% endblock %}
+
+{% block content %}
+<div class="detail-layout">
+    <aside class="sidebar">
+        <div class="sidebar-section">
+            <div class="breadcrumb">
+                <a href="/">古井档案</a> / <span class="current">{{ well.name }}</span>
+            </div>
+            <h2 class="well-title">{{ well.name }}</h2>
+            <div class="well-info">
+                {% if well.location %}<p><strong>位置：</strong>{{ well.location }}</p>{% endif %}
+                {% if well.dynasty %}<p><strong>年代：</strong>{{ well.dynasty }}</p>{% endif %}
+                {% if well.description %}<p><strong>说明：</strong>{{ well.description }}</p>{% endif %}
+                <p class="muted"><small>创建时间：{{ well.created_at.strftime('%Y-%m-%d %H:%M') }}</small></p>
+            </div>
+        </div>
+
+        <div class="sidebar-section">
+            <div class="section-header">
+                <h3>辘轳结构参数</h3>
+                <button class="btn-icon" id="toggle-config-form" title="修改参数">⚙</button>
+            </div>
+            {% if active_config %}
+            <div class="config-display">
+                <div class="config-grid">
+                    <div class="config-item">
+                        <span class="ci-label">井深</span>
+                        <span class="ci-value">{{ active_config.well_depth_m }} <em>m</em></span>
+                    </div>
+                    <div class="config-item">
+                        <span class="ci-label">桶容量</span>
+                        <span class="ci-value">{{ active_config.bucket_capacity_l }} <em>L</em></span>
+                    </div>
+                    <div class="config-item">
+                        <span class="ci-label">桶径</span>
+                        <span class="ci-value">{{ active_config.bucket_diameter_m }} <em>m</em></span>
+                    </div>
+                    <div class="config-item">
+                        <span class="ci-label">绳轮半径</span>
+                        <span class="ci-value">{{ active_config.pulley_radius_m }} <em>m</em></span>
+                    </div>
+                </div>
+                <p class="config-note">参数修改后，旧实验结论将标记为「待复核」</p>
+            </div>
+            {% else %}
+            <p class="muted">尚未配置结构参数，请先添加配置。</p>
+            {% endif %}
+
+            <div id="config-form-panel" class="form-panel compact hidden">
+                <form action="/wells/{{ well.id }}/config" method="post" id="config-form">
+                    <div class="form-row">
+                        <label class="form-group">
+                            <span class="form-label">井深 (m) <em>*</em></span>
+                            <input type="number" name="well_depth_m" step="0.01" min="0.01" required value="{{ active_config.well_depth_m if active_config else '' }}">
+                        </label>
+                    </div>
+                    <div class="form-row">
+                        <label class="form-group">
+                            <span class="form-label">桶容量 (L) <em>*</em></span>
+                            <input type="number" name="bucket_capacity_l" step="0.01" min="0.01" required value="{{ active_config.bucket_capacity_l if active_config else '' }}">
+                        </label>
+                    </div>
+                    <div class="form-row">
+                        <label class="form-group">
+                            <span class="form-label">桶径 (m) <em>*</em></span>
+                            <input type="number" name="bucket_diameter_m" step="0.01" min="0.01" required value="{{ active_config.bucket_diameter_m if active_config else '' }}">
+                        </label>
+                    </div>
+                    <div class="form-row">
+                        <label class="form-group">
+                            <span class="form-label">绳轮半径 (m) <em>*</em></span>
+                            <input type="number" name="pulley_radius_m" step="0.01" min="0.01" required value="{{ active_config.pulley_radius_m if active_config else '' }}">
+                        </label>
+                    </div>
+                    <div class="form-actions">
+                        <button type="submit" class="btn-primary">保存参数</button>
+                        <button type="button" class="btn-secondary" id="cancel-config">取消</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </aside>
+
+    <section class="content-area">
+        <div class="panel">
+            <div class="panel-header">
+                <h3>实验数据录入</h3>
+                <button class="btn-primary" id="toggle-exp-form">+ 新增实验轮次</button>
+            </div>
+
+            <div id="experiment-form" class="form-panel hidden">
+                <form action="/wells/{{ well.id }}/experiments" method="post" id="exp-form">
+                    <div class="form-row">
+                        <label class="form-group">
+                            <span class="form-label">实验轮次 <em>*</em></span>
+                            <input type="number" name="round_number" id="round_number" min="1" step="1" required placeholder="如：1">
+                        </label>
+                    </div>
+
+                    <div class="form-row">
+                        <label class="form-group full-width">
+                            <span class="form-label">时间点与出水量数据（至少2个点，时间必须递增）</span>
+                            <div id="time-points-container">
+                                <div class="time-point-row">
+                                    <span class="tp-index">1</span>
+                                    <input type="number" step="0.1" min="0" name="time_0" placeholder="时间(秒)" required>
+                                    <input type="number" step="0.01" min="0" name="water_0" placeholder="出水量(升)" required>
+                                    <button type="button" class="btn-icon remove-tp hidden" title="删除">✕</button>
+                                </div>
+                                <div class="time-point-row">
+                                    <span class="tp-index">2</span>
+                                    <input type="number" step="0.1" min="0" name="time_1" placeholder="时间(秒)" required>
+                                    <input type="number" step="0.01" min="0" name="water_1" placeholder="出水量(升)" required>
+                                    <button type="button" class="btn-icon remove-tp hidden" title="删除">✕</button>
+                                </div>
+                            </div>
+                            <button type="button" class="btn-secondary add-tp-btn" id="add-tp">+ 添加时间点</button>
+                        </label>
+                    </div>
+                    <div id="exp-form-error" class="error-msg hidden"></div>
+                    <div class="form-actions">
+                        <button type="submit" class="btn-primary">提交实验数据</button>
+                        <button type="button" class="btn-secondary" id="cancel-exp">取消</button>
+                    </div>
+                </form>
+            </div>
+
+            {% if experiments %}
+            <div class="table-wrapper">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>轮次</th>
+                            <th>单次耗时</th>
+                            <th>总出水量</th>
+                            <th>单位出水量</th>
+                            <th>平均转速</th>
+                            <th>状态</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for exp in experiments %}
+                        <tr class="{% if exp.is_abnormal %}abnormal-row{% endif %} {% if exp.review_status == 'pending_review' %}pending-row{% endif %}">
+                            <td class="text-center">第 {{ exp.round_number }} 轮</td>
+                            <td class="text-center">{{ exp.total_time_s }} s</td>
+                            <td class="text-center">{{ exp.total_water_l }} L</td>
+                            <td class="text-center highlight">{{ exp.flow_rate_lpm }} L/min</td>
+                            <td class="text-center">{{ exp.avg_speed_rpm }} rpm</td>
+                            <td class="text-center">
+                                {% if exp.review_status == 'pending_review' %}
+                                    <span class="status-tag pending">待复核</span>
+                                {% elif exp.is_abnormal %}
+                                    <span class="status-tag abnormal">异常偏低</span>
+                                {% else %}
+                                    <span class="status-tag valid">正常</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-center">
+                                <form action="/wells/{{ well.id }}/experiments/{{ exp.id }}/delete" method="post" onsubmit="return confirm('确定删除此轮实验数据？');">
+                                    <button type="submit" class="btn-link-danger">删除</button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="empty-state small">
+                <p class="empty-text">暂无实验数据，请新增实验轮次录入汲水数据。</p>
+            </div>
+            {% endif %}
+        </div>
+
+        <div class="panel">
+            <div class="panel-header">
+                <h3>绳轮转速曲线</h3>
+            </div>
+            <div id="speed-curve-chart" class="chart-container"></div>
+        </div>
+
+        <div class="panel">
+            <div class="panel-header">
+                <h3>效率指标统计</h3>
+            </div>
+            <div class="stats-grid" id="stats-panel">
+                <div class="stat-card">
+                    <span class="stat-label">实验轮次</span>
+                    <span class="stat-value" id="stat-count">0</span>
+                    <span class="stat-unit">轮</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-label">平均耗时</span>
+                    <span class="stat-value" id="stat-time">0.00</span>
+                    <span class="stat-unit">秒</span>
+                </div>
+                <div class="stat-card primary">
+                    <span class="stat-label">平均出水量</span>
+                    <span class="stat-value" id="stat-flow">0.00</span>
+                    <span class="stat-unit">L/min</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-label">平均转速</span>
+                    <span class="stat-value" id="stat-speed">0.00</span>
+                    <span class="stat-unit">rpm</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="panel">
+            <div class="panel-header">
+                <h3>多结构参数方案对比</h3>
+            </div>
+            <div id="comparison-chart" class="chart-container"></div>
+            <div id="comparison-table-container"></div>
+        </div>
+    </section>
+</div>
+
+<script>
+const WELL_ID = {{ well.id }};
+const BUCKET_CAPACITY = {{ active_config.bucket_capacity_l if active_config else 0 }};
+</script>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const configPanel = document.getElementById('config-form-panel');
+    const toggleConfigBtn = document.getElementById('toggle-config-form');
+    const cancelConfigBtn = document.getElementById('cancel-config');
+
+    if (toggleConfigBtn) {
+        toggleConfigBtn.addEventListener('click', function() {
+            configPanel.classList.toggle('hidden');
+        });
+    }
+    if (cancelConfigBtn) {
+        cancelConfigBtn.addEventListener('click', function() {
+            configPanel.classList.add('hidden');
+        });
+    }
+
+    const expForm = document.getElementById('experiment-form');
+    const toggleExpBtn = document.getElementById('toggle-exp-form');
+    const cancelExpBtn = document.getElementById('cancel-exp');
+    const addTpBtn = document.getElementById('add-tp');
+    const tpContainer = document.getElementById('time-points-container');
+    const expFormError = document.getElementById('exp-form-error');
+
+    if (toggleExpBtn) {
+        toggleExpBtn.addEventListener('click', function() {
+            expForm.classList.toggle('hidden');
+        });
+    }
+    if (cancelExpBtn) {
+        cancelExpBtn.addEventListener('click', function() {
+            expForm.classList.add('hidden');
+            expFormError.classList.add('hidden');
+        });
+    }
+
+    let tpCount = 2;
+
+    function reindexTimePoints() {
+        const rows = tpContainer.querySelectorAll('.time-point-row');
+        rows.forEach((row, idx) => {
+            row.querySelector('.tp-index').textContent = idx + 1;
+            const inputs = row.querySelectorAll('input');
+            inputs[0].name = `time_${idx}`;
+            inputs[1].name = `water_${idx}`;
+            const removeBtn = row.querySelector('.remove-tp');
+            if (rows.length <= 2) {
+                removeBtn.classList.add('hidden');
+            } else {
+                removeBtn.classList.remove('hidden');
+            }
+        });
+    }
+
+    if (addTpBtn) {
+        addTpBtn.addEventListener('click', function() {
+            tpCount++;
+            const newRow = document.createElement('div');
+            newRow.className = 'time-point-row';
+            newRow.innerHTML = `
+                <span class="tp-index">${tpCount}</span>
+                <input type="number" step="0.1" min="0" name="time_${tpCount-1}" placeholder="时间(秒)" required>
+                <input type="number" step="0.01" min="0" name="water_${tpCount-1}" placeholder="出水量(升)" required>
+                <button type="button" class="btn-icon remove-tp" title="删除">✕</button>
+            `;
+            newRow.querySelector('.remove-tp').addEventListener('click', function() {
+                newRow.remove();
+                reindexTimePoints();
+            });
+            tpContainer.appendChild(newRow);
+            reindexTimePoints();
+        });
+    }
+
+    tpContainer.querySelectorAll('.remove-tp').forEach(btn => {
+        btn.addEventListener('click', function() {
+            this.parentElement.remove();
+            reindexTimePoints();
+        });
+    });
+
+    document.getElementById('exp-form').addEventListener('submit', function(e) {
+        e.preventDefault();
+        const rows = tpContainer.querySelectorAll('.time-point-row');
+        const times = [];
+        let maxWater = 0;
+        let hasError = false;
+
+        rows.forEach((row, idx) => {
+            const inputs = row.querySelectorAll('input');
+            const t = parseFloat(inputs[0].value);
+            const w = parseFloat(inputs[1].value);
+            if (isNaN(t) || isNaN(w)) {
+                expFormError.textContent = `第${idx + 1}个时间点数据不能为空`;
+                expFormError.classList.remove('hidden');
+                hasError = true;
+            }
+            times.push(t);
+            if (w > maxWater) maxWater = w;
+        });
+
+        if (hasError) return;
+
+        for (let i = 1; i < times.length; i++) {
+            if (times[i] <= times[i - 1]) {
+                expFormError.textContent = `时间点必须严格递增：第${i + 1}个时间(${times[i]})不大于第${i}个(${times[i - 1]})`;
+                expFormError.classList.remove('hidden');
+                return;
+            }
+        }
+
+        if (BUCKET_CAPACITY > 0 && maxWater > BUCKET_CAPACITY) {
+            expFormError.textContent = `最大出水量(${maxWater}L)超过桶容量(${BUCKET_CAPACITY}L)`;
+            expFormError.classList.remove('hidden');
+            return;
+        }
+
+        expFormError.classList.add('hidden');
+        this.submit();
+    });
+
+    loadEfficiencyData();
+    loadComparisonData();
+});
+
+function loadEfficiencyData() {
+    fetch(`/api/wells/${WELL_ID}/efficiency`)
+        .then(res => res.json())
+        .then(data => {
+            renderStats(data.experiments);
+            renderSpeedCurves(data.experiments);
+        })
+        .catch(err => console.error('加载效率数据失败:', err));
+}
+
+function loadComparisonData() {
+    fetch(`/api/wells/${WELL_ID}/comparison`)
+        .then(res => res.json())
+        .then(data => {
+            renderComparisonChart(data.configs);
+            renderComparisonTable(data.configs);
+        })
+        .catch(err => console.error('加载对比数据失败:', err));
+}
+
+function renderStats(experiments) {
+    const count = experiments.length;
+    document.getElementById('stat-count').textContent = count;
+
+    if (count === 0) {
+        document.getElementById('stat-time').textContent = '0.00';
+        document.getElementById('stat-flow').textContent = '0.00';
+        document.getElementById('stat-speed').textContent = '0.00';
+        return;
+    }
+
+    const valid = experiments.filter(e => e.review_status === 'valid');
+    if (valid.length === 0) return;
+
+    const avgTime = valid.reduce((s, e) => s + e.total_time_s, 0) / valid.length;
+    const avgFlow = valid.reduce((s, e) => s + e.flow_rate_lpm, 0) / valid.length;
+    const avgSpeed = valid.reduce((s, e) => s + e.avg_speed_rpm, 0) / valid.length;
+
+    document.getElementById('stat-time').textContent = avgTime.toFixed(2);
+    document.getElementById('stat-flow').textContent = avgFlow.toFixed(2);
+    document.getElementById('stat-speed').textContent = avgSpeed.toFixed(2);
+}
+
+function renderSpeedCurves(experiments) {
+    const container = document.getElementById('speed-curve-chart');
+    if (!experiments || experiments.length === 0) {
+        container.innerHTML = '<div class="empty-state small"><p class="empty-text">暂无数据</p></div>';
+        return;
+    }
+
+    const colors = ['#2F4F4F', '#8B4513', '#B8860B', '#556B2F', '#6B4423', '#4682B4'];
+    const traces = [];
+
+    experiments.forEach((exp, idx) => {
+        const color = colors[idx % colors.length];
+        const name = `第${exp.round_number}轮${exp.is_abnormal ? '(异常)' : ''}`;
+        const dash = exp.review_status === 'pending_review' ? 'dash' : 'solid';
+
+        traces.push({
+            x: exp.speed_curve.map(p => p.time_s),
+            y: exp.speed_curve.map(p => p.rpm),
+            mode: 'lines+markers',
+            name: name,
+            line: { color: color, width: 2.5, dash: dash },
+            marker: { size: 6, color: color }
+        });
+    });
+
+    const layout = {
+        title: { text: '各轮实验绳轮转速变化曲线', font: { family: 'Noto Serif SC', size: 16, color: '#5C4033' } },
+        xaxis: { title: '时间 (秒)', gridcolor: '#E8DFD0' },
+        yaxis: { title: '转速 (rpm)', gridcolor: '#E8DFD0' },
+        legend: { orientation: 'h', y: -0.2 },
+        paper_bgcolor: 'rgba(0,0,0,0)',
+        plot_bgcolor: '#FFFBF5',
+        margin: { l: 60, r: 30, t: 60, b: 80 },
+        font: { family: 'Noto Sans SC' }
+    };
+
+    Plotly.newPlot('speed-curve-chart', traces, layout, { responsive: true, displayModeBar: true });
+}
+
+function renderComparisonChart(configs) {
+    const container = document.getElementById('comparison-chart');
+    if (!configs || configs.length === 0) {
+        container.innerHTML = '<div class="empty-state small"><p class="empty-text">尚无多组参数对比数据</p></div>';
+        return;
+    }
+
+    const labels = configs.map((c, i) => `方案${i + 1}<br>桶径${c.bucket_diameter_m}m<br>绳轮${c.pulley_radius_m}m`);
+    const flowRates = configs.map(c => c.avg_flow_rate_lpm);
+    const speeds = configs.map(c => c.avg_speed_rpm);
+
+    const trace1 = {
+        x: labels,
+        y: flowRates,
+        name: '平均出水量 (L/min)',
+        type: 'bar',
+        marker: { color: '#8B4513' },
+        yaxis: 'y'
+    };
+    const trace2 = {
+        x: labels,
+        y: speeds,
+        name: '平均转速 (rpm)',
+        type: 'scatter',
+        mode: 'lines+markers',
+        line: { color: '#2F4F4F', width: 3 },
+        marker: { size: 10 },
+        yaxis: 'y2'
+    };
+
+    const layout = {
+        title: { text: '不同结构参数方案效率对比', font: { family: 'Noto Serif SC', size: 16, color: '#5C4033' } },
+        yaxis: { title: '平均出水量 (L/min)', gridcolor: '#E8DFD0', side: 'left' },
+        yaxis2: { title: '平均转速 (rpm)', overlaying: 'y', side: 'right', showgrid: false },
+        legend: { orientation: 'h', y: -0.3 },
+        paper_bgcolor: 'rgba(0,0,0,0)',
+        plot_bgcolor: '#FFFBF5',
+        margin: { l: 60, r: 60, t: 60, b: 100 },
+        font: { family: 'Noto Sans SC' }
+    };
+
+    Plotly.newPlot('comparison-chart', [trace1, trace2], layout, { responsive: true });
+}
+
+function renderComparisonTable(configs) {
+    const container = document.getElementById('comparison-table-container');
+    if (!configs || configs.length === 0) {
+        container.innerHTML = '';
+        return;
+    }
+
+    const allFlows = configs.map(c => c.avg_flow_rate_lpm).filter(v => v > 0);
+    const maxFlow = allFlows.length > 0 ? Math.max(...allFlows) : 1;
+
+    let html = '<div class="table-wrapper"><table class="data-table"><thead><tr>';
+    html += '<th>方案</th><th>井深(m)</th><th>桶径(m)</th><th>绳轮半径(m)</th><th>实验轮次</th>';
+    html += '<th>平均出水量(L/min)</th><th>平均转速(rpm)</th></tr></thead><tbody>';
+
+    configs.forEach((c, i) => {
+        const intensity = c.avg_flow_rate_lpm > 0 ? Math.min(1, c.avg_flow_rate_lpm / maxFlow) : 0;
+        const bgColor = `rgba(139, 69, 19, ${0.1 + intensity * 0.35})`;
+        html += `<tr>
+            <td class="text-center">方案 ${i + 1}</td>
+            <td class="text-center">${c.well_depth_m}</td>
+            <td class="text-center">${c.bucket_diameter_m}</td>
+            <td class="text-center">${c.pulley_radius_m}</td>
+            <td class="text-center">${c.experiment_count}</td>
+            <td class="text-center highlight" style="background:${bgColor}">${c.avg_flow_rate_lpm}</td>
+            <td class="text-center">${c.avg_speed_rpm}</td>
+        </tr>`;
+    });
+
+    html += '</tbody></table></div>';
+    container.innerHTML = html;
+}
+</script>
+{% endblock %}
