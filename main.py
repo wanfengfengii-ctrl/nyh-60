@@ -109,6 +109,10 @@ async def create_config_endpoint(
     return RedirectResponse(url=f"/wells/{well_id}", status_code=303)
 
 
+def extract_index(key: str) -> int:
+    return int(key.rsplit("_", 1)[-1])
+
+
 @app.post("/wells/{well_id}/experiments")
 async def create_experiment_endpoint(
     well_id: int,
@@ -117,23 +121,29 @@ async def create_experiment_endpoint(
 ):
     well = get_well(db, well_id)
     if not well:
-        raise HTTPException(status_code=404, detail="古井档案不存在")
+        return JSONResponse({"success": False, "error": "古井档案不存在"}, status_code=404)
     config = get_active_config(db, well_id)
     if not config:
-        return HTMLResponse(content="<div class='error'>请先配置辘轳结构参数</div>", status_code=400)
+        return JSONResponse({"success": False, "error": "请先配置辘轳结构参数"}, status_code=400)
 
     form_data = await request.form()
 
     try:
         round_number = int(form_data.get("round_number", 0))
     except (ValueError, TypeError):
-        return HTMLResponse(content="<div class='error'>轮次必须是正整数</div>", status_code=400)
+        return JSONResponse({"success": False, "error": "轮次必须是正整数"}, status_code=400)
 
-    time_point_keys = sorted([k for k in form_data.keys() if k.startswith("time_")])
-    water_point_keys = sorted([k for k in form_data.keys() if k.startswith("water_")])
+    time_point_keys = sorted(
+        [k for k in form_data.keys() if k.startswith("time_")],
+        key=extract_index
+    )
+    water_point_keys = sorted(
+        [k for k in form_data.keys() if k.startswith("water_")],
+        key=extract_index
+    )
 
     if len(time_point_keys) != len(water_point_keys):
-        return HTMLResponse(content="<div class='error'>时间点和出水量数据不匹配</div>", status_code=400)
+        return JSONResponse({"success": False, "error": "时间点和出水量数据不匹配"}, status_code=400)
 
     time_points = []
     for i in range(len(time_point_keys)):
@@ -142,23 +152,23 @@ async def create_experiment_endpoint(
             w = float(form_data.get(water_point_keys[i], ""))
             time_points.append(TimePointCreate(point_index=i, time_s=t, water_l=w))
         except (ValueError, TypeError):
-            return HTMLResponse(content=f"<div class='error'>第{i+1}个时间点数据格式错误</div>", status_code=400)
+            return JSONResponse({"success": False, "error": f"第{i+1}个时间点数据格式错误"}, status_code=400)
 
     try:
         exp_data = ExperimentCreate(round_number=round_number, time_points=time_points)
     except ValidationError as e:
         errors = "; ".join([err["msg"] for err in e.errors()])
-        return HTMLResponse(content=f"<div class='error'>数据错误: {errors}</div>", status_code=400)
+        return JSONResponse({"success": False, "error": f"数据错误: {errors}"}, status_code=400)
 
     try:
         exp = create_experiment(db, config, exp_data)
     except ValueError as e:
-        return HTMLResponse(content=f"<div class='error'>{str(e)}</div>", status_code=400)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=400)
 
     if exp is None:
-        return HTMLResponse(content=f"<div class='error'>第{round_number}轮实验已存在</div>", status_code=400)
+        return JSONResponse({"success": False, "error": f"第{round_number}轮实验已存在"}, status_code=400)
 
-    return RedirectResponse(url=f"/wells/{well_id}", status_code=303)
+    return JSONResponse({"success": True, "redirect": f"/wells/{well_id}"})
 
 
 @app.post("/wells/{well_id}/experiments/{exp_id}/delete")

@@ -106,14 +106,14 @@
                             <div id="time-points-container">
                                 <div class="time-point-row">
                                     <span class="tp-index">1</span>
-                                    <input type="number" step="0.1" min="0" name="time_0" placeholder="时间(秒)" required>
-                                    <input type="number" step="0.01" min="0" name="water_0" placeholder="出水量(升)" required>
+                                    <input type="number" step="0.1" min="0" name="time_00" placeholder="时间(秒)" required>
+                                    <input type="number" step="0.01" min="0" name="water_00" placeholder="出水量(升)" required>
                                     <button type="button" class="btn-icon remove-tp hidden" title="删除">✕</button>
                                 </div>
                                 <div class="time-point-row">
                                     <span class="tp-index">2</span>
-                                    <input type="number" step="0.1" min="0" name="time_1" placeholder="时间(秒)" required>
-                                    <input type="number" step="0.01" min="0" name="water_1" placeholder="出水量(升)" required>
+                                    <input type="number" step="0.1" min="0" name="time_01" placeholder="时间(秒)" required>
+                                    <input type="number" step="0.01" min="0" name="water_01" placeholder="出水量(升)" required>
                                     <button type="button" class="btn-icon remove-tp hidden" title="删除">✕</button>
                                 </div>
                             </div>
@@ -266,13 +266,20 @@ document.addEventListener('DOMContentLoaded', function() {
 
     let tpCount = 2;
 
+    function padZero(num, size) {
+        let s = num.toString();
+        while (s.length < size) s = '0' + s;
+        return s;
+    }
+
     function reindexTimePoints() {
         const rows = tpContainer.querySelectorAll('.time-point-row');
         rows.forEach((row, idx) => {
             row.querySelector('.tp-index').textContent = idx + 1;
             const inputs = row.querySelectorAll('input');
-            inputs[0].name = `time_${idx}`;
-            inputs[1].name = `water_${idx}`;
+            const paddedIdx = padZero(idx, 2);
+            inputs[0].name = `time_${paddedIdx}`;
+            inputs[1].name = `water_${paddedIdx}`;
             const removeBtn = row.querySelector('.remove-tp');
             if (rows.length <= 2) {
                 removeBtn.classList.add('hidden');
@@ -284,13 +291,16 @@ document.addEventListener('DOMContentLoaded', function() {
 
     if (addTpBtn) {
         addTpBtn.addEventListener('click', function() {
-            tpCount++;
+            const rows = tpContainer.querySelectorAll('.time-point-row');
+            tpCount = rows.length + 1;
+            const newIdx = rows.length;
+            const paddedIdx = padZero(newIdx, 2);
             const newRow = document.createElement('div');
             newRow.className = 'time-point-row';
             newRow.innerHTML = `
                 <span class="tp-index">${tpCount}</span>
-                <input type="number" step="0.1" min="0" name="time_${tpCount-1}" placeholder="时间(秒)" required>
-                <input type="number" step="0.01" min="0" name="water_${tpCount-1}" placeholder="出水量(升)" required>
+                <input type="number" step="0.1" min="0" name="time_${paddedIdx}" placeholder="时间(秒)" required>
+                <input type="number" step="0.01" min="0" name="water_${paddedIdx}" placeholder="出水量(升)" required>
                 <button type="button" class="btn-icon remove-tp" title="删除">✕</button>
             `;
             newRow.querySelector('.remove-tp').addEventListener('click', function() {
@@ -309,7 +319,8 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
 
-    document.getElementById('exp-form').addEventListener('submit', function(e) {
+    const expFormElement = document.getElementById('exp-form');
+    expFormElement.addEventListener('submit', function(e) {
         e.preventDefault();
         const rows = tpContainer.querySelectorAll('.time-point-row');
         const times = [];
@@ -346,7 +357,40 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         expFormError.classList.add('hidden');
-        this.submit();
+
+        const submitBtn = expFormElement.querySelector('button[type="submit"]');
+        const originalText = submitBtn.textContent;
+        submitBtn.textContent = '提交中...';
+        submitBtn.disabled = true;
+
+        const formData = new FormData(expFormElement);
+        fetch(expFormElement.action, {
+            method: 'POST',
+            body: formData
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                showToast('实验数据提交成功！', 'success');
+                setTimeout(() => {
+                    window.location.href = data.redirect;
+                }, 500);
+            } else {
+                expFormError.textContent = data.error || '提交失败，请重试';
+                expFormError.classList.remove('hidden');
+                showToast(data.error || '提交失败', 'error');
+                submitBtn.textContent = originalText;
+                submitBtn.disabled = false;
+            }
+        })
+        .catch(err => {
+            console.error('提交错误:', err);
+            expFormError.textContent = '网络错误，请稍后重试';
+            expFormError.classList.remove('hidden');
+            showToast('网络错误，请稍后重试', 'error');
+            submitBtn.textContent = originalText;
+            submitBtn.disabled = false;
+        });
     });
 
     loadEfficiencyData();

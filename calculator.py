@@ -16,16 +16,13 @@ def calculate_speed_at_point(
     if delta_time <= 0 or delta_water <= 0:
         return 0.0
 
-    bucket_radius = config.bucket_diameter_m / 2
-    bucket_cross_section = math.pi * (bucket_radius ** 2)
-
-    delta_water_m3 = delta_water * 0.001
-    delta_height = delta_water_m3 / bucket_cross_section if bucket_cross_section > 0 else 0
-
-    linear_speed = delta_height / delta_time
-
-    if config.pulley_radius_m <= 0:
+    if config.bucket_capacity_l <= 0 or config.pulley_radius_m <= 0:
         return 0.0
+
+    bucket_cycles = delta_water / config.bucket_capacity_l
+    rope_distance = bucket_cycles * config.well_depth_m
+
+    linear_speed = rope_distance / delta_time
 
     angular_speed = linear_speed / config.pulley_radius_m
     rpm = angular_speed * 60 / (2 * math.pi)
