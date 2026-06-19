@@ -21,6 +21,7 @@ class WellUpdate(WellBase):
 class WellResponse(WellBase):
     id: int
     created_at: datetime
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -31,6 +32,7 @@ class WellConfigBase(BaseModel):
     bucket_capacity_l: float = Field(..., gt=0, description="桶容量必须大于0升")
     bucket_diameter_m: float = Field(..., gt=0, description="桶径必须大于0米")
     pulley_radius_m: float = Field(..., gt=0, description="绳轮半径必须大于0米")
+    change_note: Optional[str] = Field("", max_length=500)
 
 
 class WellConfigCreate(WellConfigBase):
@@ -43,7 +45,22 @@ class WellConfigUpdate(WellConfigBase):
 
 class WellConfigResponse(WellConfigBase):
     id: int
+    well_id: int
+    version: int
     status: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ConfigChangeLogResponse(BaseModel):
+    id: int
+    config_id: int
+    field_name: str
+    old_value: Optional[str]
+    new_value: Optional[str]
+    change_reason: str
     created_at: datetime
 
     class Config:
@@ -61,6 +78,12 @@ class TimePointCreate(TimePointBase):
     pass
 
 
+class TimePointUpdate(BaseModel):
+    point_index: Optional[int] = Field(None, ge=0)
+    time_s: Optional[float] = Field(None, ge=0)
+    water_l: Optional[float] = Field(None, ge=0)
+
+
 class TimePointResponse(TimePointBase):
     id: int
 
@@ -74,6 +97,7 @@ class ExperimentBase(BaseModel):
 
 class ExperimentCreate(ExperimentBase):
     time_points: List[TimePointCreate]
+    notes: Optional[str] = Field("", max_length=1000)
 
     @field_validator("time_points")
     @classmethod
@@ -87,6 +111,12 @@ class ExperimentCreate(ExperimentBase):
         return v
 
 
+class ExperimentUpdate(BaseModel):
+    round_number: Optional[int] = Field(None, gt=0)
+    notes: Optional[str] = Field(None, max_length=1000)
+    review_status: Optional[str] = None
+
+
 class ExperimentResponse(ExperimentBase):
     id: int
     config_id: int
@@ -96,8 +126,32 @@ class ExperimentResponse(ExperimentBase):
     flow_rate_lpm: Optional[float]
     avg_speed_rpm: Optional[float]
     is_abnormal: bool
+    notes: str
+    reviewer: Optional[str] = None
+    reviewed_at: Optional[datetime] = None
     created_at: datetime
+    updated_at: Optional[datetime] = None
     time_points: List[TimePointResponse]
+
+    class Config:
+        from_attributes = True
+
+
+class ExperimentReviewCreate(BaseModel):
+    review_action: str = Field(..., pattern="^(approve|reject|recalculate)$")
+    reviewer: Optional[str] = Field("", max_length=100)
+    comment: Optional[str] = Field("", max_length=1000)
+
+
+class ExperimentReviewResponse(BaseModel):
+    id: int
+    experiment_id: int
+    review_action: str
+    reviewer: str
+    comment: str
+    old_flow_rate: Optional[float]
+    new_flow_rate: Optional[float]
+    created_at: datetime
 
     class Config:
         from_attributes = True
@@ -112,15 +166,96 @@ class EfficiencyData(BaseModel):
     avg_speed_rpm: float
     is_abnormal: bool
     review_status: str
+    notes: str
     speed_curve: List[dict]
 
 
 class ComparisonData(BaseModel):
     config_id: int
+    version: int
     bucket_diameter_m: float
     pulley_radius_m: float
     well_depth_m: float
+    bucket_capacity_l: float
     avg_flow_rate_lpm: float
     avg_speed_rpm: float
     experiment_count: int
     experiments: List[EfficiencyData]
+
+
+class WellComparisonData(BaseModel):
+    well_id: int
+    well_name: str
+    location: str
+    dynasty: str
+    avg_flow_rate_lpm: float
+    avg_speed_rpm: float
+    experiment_count: int
+    config_count: int
+    latest_config: Optional[WellConfigResponse] = None
+
+
+class EfficiencyPredictionInput(BaseModel):
+    well_depth_m: float = Field(..., gt=0)
+    bucket_capacity_l: float = Field(..., gt=0)
+    bucket_diameter_m: float = Field(..., gt=0)
+    pulley_radius_m: float = Field(..., gt=0)
+    target_rpm: Optional[float] = Field(None, gt=0, description="目标转速(rpm)，不填则使用历史平均")
+
+
+class EfficiencyPredictionResponse(BaseModel):
+    predicted_flow_rate_lpm: float
+    predicted_time_per_bucket_s: float
+    predicted_liters_per_hour: float
+    target_rpm: float
+    bucket_cycles_per_minute: float
+    confidence: float
+    factors: dict
+
+
+class ImportExportLogResponse(BaseModel):
+    id: int
+    well_id: Optional[int]
+    operation_type: str
+    file_name: str
+    record_count: int
+    operator: str
+    status: str
+    error_message: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ExperimentReportCreate(BaseModel):
+    title: str = Field(..., min_length=1, max_length=200)
+    config_id: Optional[int] = None
+    author: Optional[str] = Field("", max_length=100)
+    summary: Optional[str] = ""
+    conclusions: Optional[str] = ""
+
+
+class ExperimentReportResponse(BaseModel):
+    id: int
+    well_id: int
+    config_id: Optional[int]
+    title: str
+    author: str
+    summary: str
+    conclusions: str
+    report_content: str
+    experiment_count: int
+    avg_flow_rate_lpm: float
+    avg_speed_rpm: float
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class CSVExperimentRow(BaseModel):
+    round_number: int
+    point_index: int
+    time_s: float
+    water_l: float

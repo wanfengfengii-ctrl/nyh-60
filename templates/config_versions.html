@@ -1,0 +1,177 @@
+{% extends "base.html" %}
+
+{% block title %}{{ well.name }} - 参数版本管理{% endblock %}
+
+{% block content %}
+<div class="page-container">
+    <div class="breadcrumb" style="margin-bottom: 20px;">
+        <a href="/">古井档案</a> / <a href="/wells/{{ well.id }}">{{ well.name }}</a> / <span class="current">参数版本管理</span>
+    </div>
+
+    <section class="panel">
+        <div class="panel-header">
+            <h3>{{ well.name }} - 辘轳结构参数版本历史</h3>
+            <button class="btn-primary" id="toggle-config-form">+ 新建参数版本</button>
+        </div>
+
+        <div id="config-form-panel" class="form-panel compact hidden">
+            <form action="/wells/{{ well.id }}/config" method="post" id="config-form">
+                <div class="form-row two-col">
+                    <label class="form-group">
+                        <span class="form-label">井深 (m) <em>*</em></span>
+                        <input type="number" name="well_depth_m" step="0.01" min="0.01" required value="{{ all_configs[0].well_depth_m if all_configs else '' }}">
+                    </label>
+                    <label class="form-group">
+                        <span class="form-label">桶容量 (L) <em>*</em></span>
+                        <input type="number" name="bucket_capacity_l" step="0.01" min="0.01" required value="{{ all_configs[0].bucket_capacity_l if all_configs else '' }}">
+                    </label>
+                </div>
+                <div class="form-row two-col">
+                    <label class="form-group">
+                        <span class="form-label">桶径 (m) <em>*</em></span>
+                        <input type="number" name="bucket_diameter_m" step="0.01" min="0.01" required value="{{ all_configs[0].bucket_diameter_m if all_configs else '' }}">
+                    </label>
+                    <label class="form-group">
+                        <span class="form-label">绳轮半径 (m) <em>*</em></span>
+                        <input type="number" name="pulley_radius_m" step="0.01" min="0.01" required value="{{ all_configs[0].pulley_radius_m if all_configs else '' }}">
+                    </label>
+                </div>
+                <div class="form-row">
+                    <label class="form-group">
+                        <span class="form-label">变更说明</span>
+                        <textarea name="change_note" rows="2" maxlength="500" placeholder="说明本次参数变更的原因..."></textarea>
+                    </label>
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn-primary">保存新版本</button>
+                    <button type="button" class="btn-secondary" id="cancel-config">取消</button>
+                </div>
+            </form>
+        </div>
+
+        {% if all_configs %}
+        <div class="table-wrapper">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>版本</th>
+                        <th>井深(m)</th>
+                        <th>桶容量(L)</th>
+                        <th>桶径(m)</th>
+                        <th>绳轮半径(m)</th>
+                        <th>状态</th>
+                        <th>创建时间</th>
+                        <th>变更说明</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for cfg in all_configs %}
+                    <tr>
+                        <td class="text-center">
+                            <span class="version-tag {{ 'active' if cfg.status == 'active' else '' }}">v{{ cfg.version }}</span>
+                        </td>
+                        <td class="text-center">{{ cfg.well_depth_m }}</td>
+                        <td class="text-center">{{ cfg.bucket_capacity_l }}</td>
+                        <td class="text-center">{{ cfg.bucket_diameter_m }}</td>
+                        <td class="text-center">{{ cfg.pulley_radius_m }}</td>
+                        <td class="text-center">
+                            {% if cfg.status == 'active' %}
+                            <span class="status-tag valid">当前使用</span>
+                            {% else %}
+                            <span class="status-tag">已归档</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-center">{{ cfg.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                        <td>{{ cfg.change_note[:30] }}{% if cfg.change_note|length > 30 %}...{% endif %}</td>
+                        <td class="text-center">
+                            {% if cfg.status != 'active' %}
+                            <form action="/wells/{{ well.id }}/config/{{ cfg.id }}/activate" method="post" style="display:inline;" onsubmit="return confirm('切换到此版本？旧实验将标记为待复核。');">
+                                <button type="submit" class="btn-link">启用此版本</button>
+                            </form>
+                            {% endif %}
+                            <button type="button" class="btn-link" onclick="showChangeLogs({{ cfg.id }})">查看变更</button>
+                            <form action="/wells/{{ well.id }}/config/{{ cfg.id }}/recalculate" method="post" style="display:inline;" onsubmit="return confirm('使用此参数重新计算所有关联实验？');">
+                                <button type="submit" class="btn-link">重算实验</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="empty-state small">
+            <p class="empty-text">暂无参数版本，请点击上方「新建参数版本」创建</p>
+        </div>
+        {% endif %}
+    </section>
+</div>
+
+<div class="modal-overlay" id="changelog-modal">
+    <div class="modal">
+        <div class="modal-header">
+            <h3>参数变更追溯</h3>
+            <button class="btn-close" onclick="closeModal('changelog-modal')">×</button>
+        </div>
+        <div id="changelog-content">
+            <div class="empty-state small"><p class="empty-text">加载中...</p></div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn-secondary" onclick="closeModal('changelog-modal')">关闭</button>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const configPanel = document.getElementById('config-form-panel');
+    const toggleConfigBtn = document.getElementById('toggle-config-form');
+    const cancelConfigBtn = document.getElementById('cancel-config');
+
+    if (toggleConfigBtn) {
+        toggleConfigBtn.addEventListener('click', function() {
+            configPanel.classList.toggle('hidden');
+        });
+    }
+    if (cancelConfigBtn) {
+        cancelConfigBtn.addEventListener('click', function() {
+            configPanel.classList.add('hidden');
+        });
+    }
+});
+
+function showChangeLogs(configId) {
+    const modal = document.getElementById('changelog-modal');
+    const content = document.getElementById('changelog-content');
+    modal.classList.add('show');
+    content.innerHTML = '<div class="empty-state small"><p class="empty-text">加载中...</p></div>';
+
+    fetch(`/api/configs/${configId}/change-logs`)
+        .then(r => r.json())
+        .then(data => {
+            if (data.logs && data.logs.length > 0) {
+                let html = '';
+                data.logs.forEach(log => {
+                    html += `<div class="change-log-item">
+                        <span class="field">${log.field_name}</span>
+                        <span class="diff">: ${log.old_value || '(无)'} → ${log.new_value}</span>
+                        ${log.change_reason ? `<div class="reason">原因: ${log.change_reason}</div>` : ''}
+                        <div class="review-meta">${log.created_at}</div>
+                    </div>`;
+                });
+                content.innerHTML = html;
+            } else {
+                content.innerHTML = '<div class="empty-state small"><p class="empty-text">暂无变更记录</p></div>';
+            }
+        })
+        .catch(err => {
+            content.innerHTML = '<div class="empty-state small"><p class="empty-text">加载失败</p></div>';
+        });
+}
+
+function closeModal(id) {
+    document.getElementById(id).classList.remove('show');
+}
+</script>
+{% endblock %}

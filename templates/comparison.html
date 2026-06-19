@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+
+{% block title %}多古井横向对比 - 古井汲水效率复原平台{% endblock %}
+
+{% block content %}
+<div class="page-container">
+    <section class="hero-section" style="padding: 32px 40px;">
+        <div class="hero-content">
+            <h1 class="hero-title" style="font-size: 28px;">多古井横向对比</h1>
+            <p class="hero-subtitle">选择多口古井，横向对比汲水效率与结构参数</p>
+        </div>
+    </section>
+
+    <section class="panel">
+        <div class="panel-header">
+            <h3>选择对比古井</h3>
+        </div>
+        {% if wells %}
+        <div class="checkbox-group" id="well-checkbox-group">
+            {% for w in wells %}
+            <label class="checkbox-item">
+                <input type="checkbox" class="well-checkbox" value="{{ w.id }}" {% if loop.index <= 2 %}checked{% endif %}>
+                <span>{{ w.name }}{% if w.location %} ({{ w.location }}){% endif %}</span>
+            </label>
+            {% endfor %}
+        </div>
+        <div style="margin-top: 16px;">
+            <button class="btn-primary" onclick="loadComparison()">开始对比</button>
+        </div>
+        {% else %}
+        <div class="empty-state small"><p class="empty-text">暂无古井档案</p></div>
+        {% endif %}
+    </section>
+
+    <section class="panel" id="comparison-result" style="display:none;">
+        <div class="panel-header">
+            <h3>对比结果</h3>
+        </div>
+        <div id="multi-well-chart" class="chart-container"></div>
+        <div id="multi-well-table"></div>
+    </section>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const checked = document.querySelectorAll('.well-checkbox:checked');
+    if (checked.length > 0) {
+        loadComparison();
+    }
+});
+
+function loadComparison() {
+    const checkboxes = document.querySelectorAll('.well-checkbox:checked');
+    const ids = Array.from(checkboxes).map(c => c.value);
+    if (ids.length < 2) {
+        showToast('请至少选择2口古井进行对比', 'error');
+        return;
+    }
+
+    document.getElementById('comparison-result').style.display = 'block';
+    document.getElementById('multi-well-chart').innerHTML = '<div class="empty-state small"><p class="empty-text">加载中...</p></div>';
+
+    fetch(`/api/wells/comparison?well_ids=${ids.join(',')}`)
+        .then(r => r.json())
+        .then(data => renderMultiWellComparison(data.wells))
+        .catch(err => {
+            document.getElementById('multi-well-chart').innerHTML = '<div class="empty-state small"><p class="empty-text">加载失败</p></div>';
+        });
+}
+
+function renderMultiWellComparison(wells) {
+    if (!wells || wells.length === 0) {
+        document.getElementById('multi-well-chart').innerHTML = '<div class="empty-state small"><p class="empty-text">无对比数据</p></div>';
+        return;
+    }
+
+    const labels = wells.map(w => w.well_name);
+    const flows = wells.map(w => w.avg_flow_rate_lpm);
+    const speeds = wells.map(w => w.avg_speed_rpm);
+    const counts = wells.map(w => w.experiment_count);
+
+    const trace1 = {
+        x: labels,
+        y: flows,
+        name: '平均出水量 (L/min)',
+        type: 'bar',
+        marker: { color: '#8B4513' },
+        yaxis: 'y'
+    };
+    const trace2 = {
+        x: labels,
+        y: speeds,
+        name: '平均转速 (rpm)',
+        type: 'scatter',
+        mode: 'lines+markers',
+        line: { color: '#2F4F4F', width: 3 },
+        marker: { size: 10 },
+        yaxis: 'y2'
+    };
+    const trace3 = {
+        x: labels,
+        y: counts,
+        name: '实验轮次',
+        type: 'bar',
+        marker: { color: '#B8860B' },
+        yaxis: 'y',
+        opacity: 0.6
+    };
+
+    const layout = {
+        title: { text: '多古井汲水效率横向对比', font: { family: 'Noto Serif SC', size: 16, color: '#5C4033' } },
+        yaxis: { title: '出水量/轮次', gridcolor: '#E8DFD0', side: 'left' },
+        yaxis2: { title: '平均转速 (rpm)', overlaying: 'y', side: 'right', showgrid: false },
+        barmode: 'group',
+        legend: { orientation: 'h', y: -0.3 },
+        paper_bgcolor: 'rgba(0,0,0,0)',
+        plot_bgcolor: '#FFFBF5',
+        margin: { l: 60, r: 60, t: 60, b: 100 },
+        font: { family: 'Noto Sans SC' }
+    };
+
+    Plotly.newPlot('multi-well-chart', [trace1, trace3, trace2], layout, { responsive: true });
+
+    let tableHtml = '<div class="table-wrapper" style="margin-top:24px;"><table class="data-table"><thead><tr>';
+    tableHtml += '<th>古井名称</th><th>位置</th><th>年代</th><th>参数版本数</th><th>实验轮次</th>';
+    tableHtml += '<th>平均出水量(L/min)</th><th>平均转速(rpm)</th><th>最新结构参数</th></tr></thead><tbody>';
+    wells.forEach(w => {
+        const cfg = w.latest_config;
+        const cfgText = cfg ? `井深${cfg.well_depth_m}m/桶${cfg.bucket_capacity_l}L/绳轮${cfg.pulley_radius_m}m` : '-';
+        tableHtml += `<tr>
+            <td class="text-center"><strong>${w.well_name}</strong></td>
+            <td class="text-center">${w.location || '-'}</td>
+            <td class="text-center">${w.dynasty || '-'}</td>
+            <td class="text-center">${w.config_count}</td>
+            <td class="text-center">${w.experiment_count}</td>
+            <td class="text-center highlight">${w.avg_flow_rate_lpm}</td>
+            <td class="text-center">${w.avg_speed_rpm}</td>
+            <td style="font-size:12px;">${cfgText}</td>
+        </tr>`;
+    });
+    tableHtml += '</tbody></table></div>';
+    document.getElementById('multi-well-table').innerHTML = tableHtml;
+}
+</script>
+{% endblock %}

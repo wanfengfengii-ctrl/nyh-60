@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+
+{% block title %}研究报告 - 古井汲水效率复原平台{% endblock %}
+
+{% block content %}
+<div class="page-container">
+    <section class="hero-section" style="padding: 32px 40px;">
+        <div class="hero-content">
+            <h1 class="hero-title" style="font-size: 28px;">实验研究报告</h1>
+            <p class="hero-subtitle">生成结构化研究报告，可打印输出用于学术发表</p>
+        </div>
+    </section>
+
+    <section class="panel">
+        <div class="panel-header">
+            <h3>已生成报告</h3>
+        </div>
+
+        {% if reports %}
+        <div class="table-wrapper">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>报告标题</th>
+                        <th>古井</th>
+                        <th>作者</th>
+                        <th>实验轮次</th>
+                        <th>平均出水量</th>
+                        <th>平均转速</th>
+                        <th>创建时间</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in reports %}
+                    <tr>
+                        <td><strong>{{ r.title }}</strong></td>
+                        <td class="text-center">
+                            {% for w in wells %}{% if w.id == r.well_id %}{{ w.name }}{% endif %}{% endfor %}
+                        </td>
+                        <td class="text-center">{{ r.author or '-' }}</td>
+                        <td class="text-center">{{ r.experiment_count }} 轮</td>
+                        <td class="text-center highlight">{{ r.avg_flow_rate_lpm }} L/min</td>
+                        <td class="text-center">{{ r.avg_speed_rpm }} rpm</td>
+                        <td class="text-center">{{ r.created_at.strftime('%Y-%m-%d') }}</td>
+                        <td class="text-center">
+                            <a href="/reports/{{ r.id }}" class="btn-link">查看</a>
+                            <a href="/reports/{{ r.id }}/print" class="btn-link" target="_blank">打印</a>
+                            <form action="/reports/{{ r.id }}/delete" method="post" style="display:inline;" onsubmit="return confirm('确定删除此报告？');">
+                                <button type="submit" class="btn-link-danger" style="padding:4px 8px;">删除</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="empty-state small">
+            <p class="empty-text">暂无报告，进入古井详情页生成研究报告</p>
+        </div>
+        {% endif %}
+    </section>
+</div>
+{% endblock %}

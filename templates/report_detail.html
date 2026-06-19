@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+
+{% block title %}{{ report.title }} - 研究报告{% endblock %}
+
+{% block content %}
+<div class="page-container">
+    <div class="breadcrumb" style="margin-bottom: 20px;">
+        <a href="/reports">研究报告</a> / <span class="current">{{ report.title }}</span>
+    </div>
+
+    <div class="report-actions">
+        <a href="/reports" class="btn-secondary">← 返回报告列表</a>
+        <a href="/reports/{{ report.id }}/print" class="btn-primary" target="_blank">🖨 打印/导出PDF</a>
+        {% if well %}
+        <a href="/wells/{{ well.id }}" class="btn-secondary">查看古井详情</a>
+        {% endif %}
+    </div>
+
+    <section class="panel">
+        <div class="report-content" id="report-content">
+            <h1>{{ report.title }}</h1>
+            <p style="color: var(--color-muted); margin-bottom: 24px;">
+                {% if report.author %}作者: {{ report.author }} · {% endif %}
+                创建时间: {{ report.created_at.strftime('%Y-%m-%d %H:%M') }}
+            </p>
+
+            {% if report.summary %}
+            <div style="background: var(--color-bg-warm); padding: 16px 20px; border-left: 4px solid var(--color-primary); border-radius: var(--radius-sm); margin-bottom: 24px;">
+                <h2 style="margin-top:0;">研究摘要</h2>
+                <p style="white-space: pre-wrap;">{{ report.summary }}</p>
+            </div>
+            {% endif %}
+
+            <div class="stats-grid" style="margin: 24px 0;">
+                <div class="stat-card primary">
+                    <span class="stat-label">有效实验轮次</span>
+                    <span class="stat-value">{{ report.experiment_count }}</span>
+                    <span class="stat-unit">轮</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-label">平均出水量</span>
+                    <span class="stat-value">{{ report.avg_flow_rate_lpm }}</span>
+                    <span class="stat-unit">L/min</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-label">平均转速</span>
+                    <span class="stat-value">{{ report.avg_speed_rpm }}</span>
+                    <span class="stat-unit">rpm</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-label">每小时出水量</span>
+                    <span class="stat-value">{{ (report.avg_flow_rate_lpm * 60)|round(1) }}</span>
+                    <span class="stat-unit">L/h</span>
+                </div>
+            </div>
+
+            <div style="white-space: pre-wrap; line-height: 1.9;">
+                {{ report.report_content }}
+            </div>
+
+            {% if report.conclusions %}
+            <div style="background: var(--color-bg-warm); padding: 16px 20px; border-left: 4px solid var(--color-secondary); border-radius: var(--radius-sm); margin-top: 24px;">
+                <h2>研究结论</h2>
+                <p style="white-space: pre-wrap;">{{ report.conclusions }}</p>
+            </div>
+            {% endif %}
+        </div>
+    </section>
+</div>
+{% endblock %}

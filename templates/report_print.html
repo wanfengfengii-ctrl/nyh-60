@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ report.title }} - 研究报告打印版</title>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700&family=Noto+Sans+SC:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+    <style>
+        body {
+            background: white !important;
+            background-image: none !important;
+            padding: 40px;
+            font-family: 'Noto Serif SC', serif;
+        }
+        .report-header {
+            text-align: center;
+            border-bottom: 3px double #5C4033;
+            padding-bottom: 24px;
+            margin-bottom: 32px;
+        }
+        .report-header h1 {
+            font-size: 28px;
+            color: #5C4033;
+            margin-bottom: 12px;
+        }
+        .report-meta {
+            text-align: center;
+            color: #6D4C41;
+            font-size: 14px;
+            margin-bottom: 32px;
+        }
+        .watermark {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) rotate(-30deg);
+            font-size: 80px;
+            color: rgba(139, 69, 19, 0.06);
+            pointer-events: none;
+            font-weight: 700;
+            letter-spacing: 8px;
+            white-space: nowrap;
+        }
+        .summary-box, .conclusion-box {
+            padding: 16px 24px;
+            margin: 20px 0;
+            border: 1px solid #D2B48C;
+            background: #FFFBF5;
+            border-radius: 4px;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+            margin: 24px 0;
+        }
+        .stat-card {
+            text-align: center;
+            padding: 16px;
+            border: 1px solid #D2B48C;
+            border-radius: 8px;
+        }
+        .stat-card .sv {
+            font-size: 28px;
+            font-weight: 700;
+            color: #5C4033;
+        }
+        .stat-card .sl {
+            font-size: 12px;
+            color: #8D6E63;
+        }
+        .stat-card .su {
+            font-size: 12px;
+            color: #8D6E63;
+        }
+        h2 {
+            color: #5C4033;
+            border-bottom: 2px solid #D2B48C;
+            padding-bottom: 8px;
+            margin-top: 28px;
+            margin-bottom: 16px;
+            font-size: 18px;
+        }
+        h3 {
+            color: #5C4033;
+            font-size: 15px;
+            margin-top: 16px;
+        }
+        ul {
+            margin-left: 24px;
+        }
+        li {
+            margin-bottom: 6px;
+        }
+        .footer-signature {
+            margin-top: 60px;
+            display: flex;
+            justify-content: space-between;
+            padding-top: 24px;
+            border-top: 1px solid #D2B48C;
+            color: #6D4C41;
+            font-size: 14px;
+        }
+        @media print {
+            body { padding: 0; }
+        }
+    </style>
+</head>
+<body>
+    <div class="watermark">古井汲水效率研究</div>
+
+    <div class="report-header">
+        <h1>{{ report.title }}</h1>
+        <p style="color:#8D6E63;">古井汲水效率复原平台 · 研究报告</p>
+    </div>
+
+    <div class="report-meta">
+        {% if well %}古井: <strong>{{ well.name }}</strong> · {% endif %}
+        {% if report.author %}作者: <strong>{{ report.author }}</strong> · {% endif %}
+        生成日期: <strong>{{ report.created_at.strftime('%Y 年 %m 月 %d 日') }}</strong>
+    </div>
+
+    {% if report.summary %}
+    <div class="summary-box">
+        <h2 style="border:none; margin-top:0; padding:0;">研究摘要</h2>
+        <p style="white-space: pre-wrap; line-height: 1.8;">{{ report.summary }}</p>
+    </div>
+    {% endif %}
+
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="sv">{{ report.experiment_count }}</div>
+            <div class="sl">有效实验</div>
+            <div class="su">轮</div>
+        </div>
+        <div class="stat-card">
+            <div class="sv">{{ report.avg_flow_rate_lpm }}</div>
+            <div class="sl">平均出水量</div>
+            <div class="su">L/min</div>
+        </div>
+        <div class="stat-card">
+            <div class="sv">{{ report.avg_speed_rpm }}</div>
+            <div class="sl">平均转速</div>
+            <div class="su">rpm</div>
+        </div>
+        <div class="stat-card">
+            <div class="sv">{{ (report.avg_flow_rate_lpm * 60)|round(1) }}</div>
+            <div class="sl">估算日产水量</div>
+            <div class="su">L/h</div>
+        </div>
+    </div>
+
+    <div style="line-height: 1.9; white-space: pre-wrap;">
+        {{ report.report_content }}
+    </div>
+
+    {% if report.conclusions %}
+    <div class="conclusion-box">
+        <h2 style="border:none; margin-top:0; padding:0;">研究结论</h2>
+        <p style="white-space: pre-wrap; line-height: 1.8;">{{ report.conclusions }}</p>
+    </div>
+    {% endif %}
+
+    <div class="footer-signature">
+        <div>报告生成系统: 古井汲水效率复原平台 v2.0</div>
+        <div>打印时间: {{ report.created_at.strftime('%Y-%m-%d') }}</div>
+    </div>
+
+    <script>
+        window.onload = function() {
+            setTimeout(function() { window.print(); }, 300);
+        };
+    </script>
+</body>
+</html>

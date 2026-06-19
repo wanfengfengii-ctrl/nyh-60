@@ -1,0 +1,170 @@
+{% extends "base.html" %}
+
+{% block title %}待复核实验中心 - 古井汲水效率复原平台{% endblock %}
+
+{% block content %}
+<div class="page-container">
+    <section class="hero-section" style="padding: 32px 40px;">
+        <div class="hero-content">
+            <h1 class="hero-title" style="font-size: 28px;">待复核实验中心</h1>
+            <p class="hero-subtitle">参数变更后旧实验需重新复核，确保研究结论可靠</p>
+        </div>
+    </section>
+
+    <section class="panel">
+        <div class="panel-header">
+            <h3>待复核实验列表</h3>
+        </div>
+
+        {% if pending_experiments %}
+        <div class="table-wrapper">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>古井</th>
+                        <th>实验轮次</th>
+                        <th>耗时(s)</th>
+                        <th>出水量(L/min)</th>
+                        <th>转速(rpm)</th>
+                        <th>提交时间</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for exp in pending_experiments %}
+                    <tr class="pending-row">
+                        <td class="text-center">
+                            <a href="/wells/{{ exp.config.well_id }}">{{ exp.config.well.name }}</a>
+                        </td>
+                        <td class="text-center">第 {{ exp.round_number }} 轮</td>
+                        <td class="text-center">{{ exp.total_time_s }}</td>
+                        <td class="text-center highlight">{{ exp.flow_rate_lpm }}</td>
+                        <td class="text-center">{{ exp.avg_speed_rpm }}</td>
+                        <td class="text-center">{{ exp.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                        <td class="text-center">
+                            <button class="btn-link" onclick="reviewExperiment({{ exp.id }}, {{ exp.config_id }})">复核处理</button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <div class="empty-icon">✓</div>
+            <p class="empty-text">暂无待复核实验，所有数据状态良好</p>
+        </div>
+        {% endif %}
+    </section>
+</div>
+
+<div class="modal-overlay" id="review-modal">
+    <div class="modal">
+        <div class="modal-header">
+            <h3>实验复核处理</h3>
+            <button class="btn-close" onclick="closeModal('review-modal')">×</button>
+        </div>
+        <div id="review-content">
+        </div>
+    </div>
+</div>
+
+<script>
+function reviewExperiment(expId, configId) {
+    const modal = document.getElementById('review-modal');
+    const content = document.getElementById('review-content');
+    modal.classList.add('show');
+
+    content.innerHTML = '<div class="empty-state small"><p class="empty-text">加载中...</p></div>';
+
+    fetch(`/api/experiments/${expId}`)
+        .then(r => r.json())
+        .then(exp => {
+            fetch(`/api/experiments/${expId}/reviews`)
+                .then(r => r.json())
+                .then(reviewsData => {
+                    let tpsHtml = '';
+                    exp.time_points.forEach((tp, i) => {
+                        tpsHtml += `<div class="time-point-row">
+                            <span class="tp-index">${i + 1}</span>
+                            <span style="flex:1;padding:0 12px;">${tp.time_s} s / ${tp.water_l} L</span>
+                        </div>`;
+                    });
+
+                    let reviewsHtml = '';
+                    if (reviewsData.reviews && reviewsData.reviews.length > 0) {
+                        reviewsHtml = '<h4 style="margin-top:20px;margin-bottom:12px;">历史复核记录</h4>';
+                        reviewsData.reviews.forEach(r => {
+                            const actionLabel = r.review_action === 'approve' ? '通过' : (r.review_action === 'reject' ? '驳回' : '重算');
+                            reviewsHtml += `<div class="change-log-item">
+                                <span class="field">${actionLabel}</span>
+                                ${r.comment ? `<div class="reason">${r.comment}</div>` : ''}
+                                <div class="review-meta">${r.reviewer || '匿名'} · ${r.created_at}</div>
+                            </div>`;
+                        });
+                    }
+
+                    content.innerHTML = `
+                        <div class="config-display" style="margin-bottom:16px;">
+                            <div class="config-grid">
+                                <div class="config-item"><span class="ci-label">轮次</span><span class="ci-value">第${exp.round_number}轮</span></div>
+                                <div class="config-item"><span class="ci-label">出水量</span><span class="ci-value">${exp.notes ? exp.notes.slice(0, 20) : '-'}<em></em></span></div>
+                            </div>
+                            <p style="margin-top:8px;font-size:13px;color:var(--color-muted);">备注: ${exp.notes || '无'}</p>
+                        </div>
+
+                        <h4 style="margin-bottom:12px;">时间点数据</h4>
+                        ${tpsHtml}
+
+                        <div style="margin-top:20px;">
+                            <label class="form-group">
+                                <span class="form-label">复核人</span>
+                                <input type="text" id="reviewer" maxlength="100" placeholder="输入复核人姓名">
+                            </label>
+                        </div>
+                        <div style="margin-top:12px;">
+                            <label class="form-group">
+                                <span class="form-label">复核意见</span>
+                                <textarea id="review-comment" rows="2" maxlength="1000" placeholder="填写复核说明..."></textarea>
+                            </label>
+                        </div>
+
+                        ${reviewsHtml}
+
+                        <div class="modal-footer">
+                            <button type="button" class="btn-secondary" onclick="closeModal('review-modal')">取消</button>
+                            <button type="button" class="btn-secondary" onclick="submitReview(${expId}, ${configId}, 'recalculate')">重新计算</button>
+                            <button type="button" class="btn-primary" onclick="submitReview(${expId}, ${configId}, 'reject')" style="background:var(--color-danger);">驳回复核</button>
+                            <button type="button" class="btn-primary" onclick="submitReview(${expId}, ${configId}, 'approve')" style="background:var(--color-success);">确认通过</button>
+                        </div>
+                    `;
+                });
+        });
+}
+
+function submitReview(expId, configId, action) {
+    const reviewer = document.getElementById('reviewer').value;
+    const comment = document.getElementById('review-comment').value;
+
+    fetch(`/api/experiments/${expId}/review`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ review_action: action, reviewer: reviewer, comment: comment })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            showToast(action === 'approve' ? '复核通过' : (action === 'reject' ? '已驳回' : '已重新计算'), 'success');
+            setTimeout(() => location.reload(), 600);
+        } else {
+            showToast(data.error || '操作失败', 'error');
+        }
+    })
+    .catch(err => showToast('网络错误', 'error'));
+}
+
+function closeModal(id) {
+    document.getElementById(id).classList.remove('show');
+}
+</script>
+{% endblock %}
