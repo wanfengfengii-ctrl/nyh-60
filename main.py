@@ -219,6 +219,27 @@ async def get_config_change_logs_api(config_id: int, db: Session = Depends(get_d
     ]})
 
 
+@app.get("/api/wells/{well_id}/configs")
+async def get_well_configs_api(well_id: int, db: Session = Depends(get_db)):
+    well = get_well(db, well_id)
+    if not well:
+        raise HTTPException(status_code=404, detail="古井档案不存在")
+    configs = get_all_configs(db, well_id)
+    return JSONResponse({
+        "configs": [
+            {
+                "config_id": c.id,
+                "version": c.version,
+                "well_depth_m": c.well_depth_m,
+                "bucket_capacity_l": c.bucket_capacity_l,
+                "bucket_diameter_m": c.bucket_diameter_m,
+                "pulley_radius_m": c.pulley_radius_m,
+                "status": c.status
+            } for c in configs
+        ]
+    })
+
+
 def extract_index(key: str) -> int:
     return int(key.rsplit("_", 1)[-1])
 
@@ -1059,7 +1080,7 @@ async def get_well_labor_experiments_api(well_id: int, db: Session = Depends(get
     return JSONResponse({"experiments": result})
 
 
-@app.post("/wells/{well_id}/labor-comparisons")
+@app.post("/api/wells/{well_id}/labor-comparisons")
 async def create_labor_comparison_endpoint(
     well_id: int,
     request: Request,
@@ -1096,7 +1117,7 @@ async def create_labor_comparison_endpoint(
     except ValueError as e:
         return JSONResponse({"success": False, "error": str(e)}, status_code=400)
 
-    return JSONResponse({"success": True, "group_id": group.id, "redirect": "/labor-analysis"})
+    return JSONResponse({"success": True, "group_id": group.id, "comparison_id": group.id, "redirect": "/labor-analysis"})
 
 
 @app.get("/api/labor-comparisons/{group_id}")

@@ -388,6 +388,12 @@ document.addEventListener('DOMContentLoaded', function() {
             document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
             this.classList.add('active');
             document.getElementById(this.dataset.tab).classList.add('active');
+
+            const tabId = this.dataset.tab;
+            if (tabId === 'tab4') {
+                loadAvailableExperiments();
+                loadComparisonGroups();
+            }
         });
     });
 
@@ -493,11 +499,12 @@ function loadConfigsForWell() {
     const configSel = document.getElementById('f-config');
     configSel.innerHTML = '<option value="">不关联结构参数</option>';
     if (!wellId) return;
-    fetch(`/api/wells/${wellId}/comparison`)
+    fetch(`/api/wells/${wellId}/configs`)
         .then(r => r.json())
         .then(data => {
             (data.configs || []).forEach(c => {
-                configSel.innerHTML += `<option value="${c.config_id}">v${c.version} 井深${c.well_depth_m}m/桶${c.bucket_capacity_l}L</option>`;
+                const statusTag = c.status === 'active' ? ' [当前]' : '';
+                configSel.innerHTML += `<option value="${c.config_id}">v${c.version}${statusTag} 井深${c.well_depth_m}m/桶${c.bucket_capacity_l}L/轮${c.pulley_radius_m}m</option>`;
             });
         });
 }
@@ -1123,8 +1130,10 @@ function createComparisonGroup() {
 }
 
 function loadComparisonGroups() {
-    const wid = document.getElementById('cmp-well').value;
+    const wellSel = document.getElementById('cmp-well');
     const container = document.getElementById('comparison-groups');
+    if (!wellSel || !container) return;
+    const wid = wellSel.value;
     if (!wid) { container.innerHTML = '<p class="muted" style="margin:0; font-size:13px;">请先选择古井</p>'; return; }
     container.innerHTML = '<p class="muted" style="margin:0; font-size:13px;">加载中...</p>';
 
@@ -1481,6 +1490,5 @@ document.addEventListener('DOMContentLoaded', function() {
     loadAvailableExperiments();
     loadComparisonGroups();
 });
+</script>
 {% endblock %}
-</body>
-</html>
